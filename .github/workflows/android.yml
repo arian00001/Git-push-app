@@ -21,7 +21,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
+      - name: Checkout source
         uses: actions/checkout@v4
 
       - name: Set up JDK 17
@@ -37,29 +37,31 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          packages: |
-            cmdline-tools;latest
-            platform-tools
-            platforms;android-35
-            build-tools;35.0.0
 
-      - name: Install Android SDK packages
+      - name: Install required Android SDK packages
         shell: bash
         run: |
           set -euo pipefail
-
-          if ! command -v sdkmanager >/dev/null 2>&1; then
-            echo "::error::sdkmanager is not available on PATH. Check Android SDK setup."
-            if [ -n "${ANDROID_HOME:-}" ]; then
-              find "${ANDROID_HOME}" -path '*/bin/sdkmanager' -print 2>/dev/null || true
-            fi
+          SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+          if [[ -z "$SDK_ROOT" ]]; then
+            echo "::error::ANDROID_HOME and ANDROID_SDK_ROOT are both unset"
             exit 1
           fi
-
-          echo "Using sdkmanager from: $(command -v sdkmanager)"
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
+          export ANDROID_HOME="$SDK_ROOT"
+          export ANDROID_SDK_ROOT="$SDK_ROOT"
+          SDKMANAGER="$SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          if [[ ! -x "$SDKMANAGER" ]]; then
+            echo "::error::sdkmanager not found at $SDKMANAGER"
+            find "$SDK_ROOT/cmdline-tools" -maxdepth 4 -type f -name sdkmanager -print || true
+            exit 1
+          fi
+          yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses >/dev/null || true
+          "$SDKMANAGER" --sdk_root="$SDK_ROOT" --install \
+            "platform-tools" \
+            "platforms;android-35" \
+            "build-tools;35.0.0"
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
 
       - name: Build debug APK
         run: gradle --no-daemon --stacktrace assembleDebug
@@ -67,7 +69,7 @@ jobs:
       - name: Run unit tests
         run: gradle --no-daemon --stacktrace testDebugUnitTest
 
-      - name: Upload APK artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: dev-style-studio-debug-apk
