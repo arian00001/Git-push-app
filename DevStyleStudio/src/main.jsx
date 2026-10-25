@@ -1,362 +1,57 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import JSZip from 'jszip';
-import {
-  Home, Folder, MessageSquare, Network, Globe, Settings, UserRound, Plus,
-  Upload, FileArchive, FileCode2, Sparkles, Pencil, PanelsTopLeft, Github,
-  Rocket, Mail, ShieldCheck, Download, Search, Trash2, CheckCircle2,
-  CircleAlert, ChevronDown, ChevronRight, ExternalLink, RefreshCw, X,
-  FolderOpen, GitBranch, Eye, EyeOff, KeyRound, Smartphone, Terminal,
-  CloudUpload, File, PackageCheck, Menu
-} from 'lucide-react';
+import { Upload, FileArchive, FolderTree, Github, Plus, Trash2, ExternalLink, RefreshCw, Settings, KeyRound, Eye, EyeOff, X, CheckCircle2, CircleAlert, LoaderCircle, Rocket, Download, Sparkles, Globe, GitBranch, ChevronRight, File, FolderOpen, ShieldCheck, Clock3, PackageCheck, CloudUpload, RotateCw, Smartphone, Monitor, FileCode2 } from 'lucide-react';
 import './style.css';
 
-const STORE = 'dss_settings_v1';
-const readSettings = () => { try { return JSON.parse(localStorage.getItem(STORE) || '{}'); } catch { return {}; } };
-const api = async (path, token, options={}) => {
-  const res = await fetch(`https://api.github.com${path}`, {
-    ...options, headers: { Accept:'application/vnd.github+json', ...(token ? {Authorization:`Bearer ${token}`} : {}), ...(options.body ? {'Content-Type':'application/json'} : {}), ...options.headers }
-  });
-  const data = res.status === 204 ? null : await res.json().catch(()=>({}));
-  if (!res.ok) throw new Error(data.message || `GitHub API error (${res.status})`);
-  return data;
-};
-const b64 = (str) => btoa(unescape(encodeURIComponent(str)));
-const bytesToBase64 = (bytes) => { let binary = ''; const chunk = 0x8000; for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode(...bytes.subarray(i, i + chunk)); return btoa(binary); };
-const App = () => {
-  const [settings, setSettings] = useState(readSettings);
-  const [tab, setTab] = useState('Workspace');
-  const [pipelineStage, setPipelineStage] = useState('zip');
-  const [pushProgress, setPushProgress] = useState(0);
-  const [showSettings, setShowSettings] = useState(false);
-  const [showToken, setShowToken] = useState(false);
-  const [notice, setNotice] = useState(null);
-  const [busy, setBusy] = useState(false);
-  const [owner, setOwner] = useState('');
-  const [repos, setRepos] = useState([]);
-  const [selected, setSelected] = useState('');
-  const [files, setFiles] = useState([]);
-  const [zipName, setZipName] = useState('');
-  const [filter, setFilter] = useState('');
-  const [branch, setBranch] = useState('main');
-  const [newRepo, setNewRepo] = useState('');
-  const [isPrivate, setIsPrivate] = useState(true);
-  const [showCreate, setShowCreate] = useState(false);
-  const [vercelStatus, setVercelStatus] = useState('');
-  const [workflows, setWorkflows] = useState([]);
-  const [workflowId, setWorkflowId] = useState('');
-  const [runs, setRuns] = useState([]);
-  const [artifacts, setArtifacts] = useState([]);
-  const [geminiReport, setGeminiReport] = useState('');
-  const [buildBusy, setBuildBusy] = useState(false);
-  const [buildStartedAt, setBuildStartedAt] = useState(null);
-  const [elapsed, setElapsed] = useState(0);
-  const [expanded, setExpanded] = useState(true);
-  const [mobileNav, setMobileNav] = useState(false);
-  const [logs, setLogs] = useState(['Workspace initialized', 'Waiting for a ZIP project…']);
-  const log = (s) => setLogs(old => [`${new Date().toLocaleTimeString()}  ${s}`, ...old].slice(0,7));
-  const toast = (type, text) => { setNotice({type,text}); setTimeout(()=>setNotice(null), 4200); };
-  useEffect(()=>{ localStorage.setItem(STORE, JSON.stringify(settings)); }, [settings]);
-  const selectedRepo = repos.find(r=>r.full_name===selected);
-  const visibleFiles = useMemo(()=>files.filter(f=>f.path.toLowerCase().includes(filter.toLowerCase())).slice(0,120),[files,filter]);
-  const saveSettings = async () => {
-    if (!settings.githubToken?.trim()) { toast('error','Add a GitHub token first.'); return; }
-    setBusy(true);
-    try {
-      const u = await api('/user', settings.githubToken.trim());
-      setOwner(u.login);
-      setSettings(s=>({...s, githubToken:s.githubToken.trim(), githubUsername:u.login}));
-      log(`Authenticated as @${u.login}`);
-      toast('success',`GitHub connected as @${u.login}`);
-      setShowSettings(false);
-      await loadRepos(u.login, settings.githubToken.trim());
-    } catch(e) { toast('error',e.message); }
-    finally { setBusy(false); }
-  };
-  const loadRepos = async (login=owner, token=settings.githubToken) => {
-    if (!token) return toast('error','Save your GitHub token in Settings first.');
-    setBusy(true);
-    try {
-      const u = login || (await api('/user',token)).login;
-      const data = await api(`/users/${encodeURIComponent(u)}/repos?per_page=100&sort=updated`,token);
-      setOwner(u); setRepos(data); if (pipelineStage==='repo' && data.length===0) setPipelineStage('repo'); log(`Loaded ${data.length} repositories`); toast('success',`Loaded ${data.length} repositories`);
-    } catch(e) { toast('error',e.message); }
-    finally { setBusy(false); }
-  };
-  const pickZip = async (event) => {
-    const file = event.target.files?.[0]; if(!file) return;
-    setBusy(true); setZipName(file.name);
-    try {
-      const zip = await JSZip.loadAsync(file);
-      const all = [];
-      for (const [path, item] of Object.entries(zip.files)) {
-        if(item.dir) continue;
-        const clean = path.replace(/^\/+/, '');
-        if (!clean || clean.split('/').some(p=>p==='..') || clean.startsWith('.git/')) continue;
-        const blob = await item.async('uint8array');
-        all.push({path:clean, bytes:blob, size:blob.byteLength});
-      }
-      if(!all.length) throw new Error('No usable files found in this ZIP.');
-      setFiles(all.sort((a,b)=>a.path.localeCompare(b.path)));
-      setPipelineStage('repo');
-      log(`Imported ${all.length} files from ${file.name}`);
-      toast('success',`ZIP unpacked: ${all.length} files`);
-    } catch(e) { toast('error',`ZIP import failed: ${e.message}`); }
-    finally { setBusy(false); event.target.value=''; }
-  };
-  const createRepo = async () => {
-    if(!newRepo.trim()) return toast('error','Enter a repository name.');
-    setBusy(true);
-    try {
-      const r = await api('/user/repos',settings.githubToken,{method:'POST',body:JSON.stringify({name:newRepo.trim(),private:isPrivate,auto_init:true,description:'Created with Dev Style Studio'})});
-      setRepos(old=>[r,...old.filter(x=>x.full_name!==r.full_name)]); setSelected(r.full_name); setPipelineStage('push'); setNewRepo(''); setShowCreate(false); log(`Created ${r.full_name}`); toast('success','Repository created.');
-    } catch(e) { toast('error',e.message); }
-    finally { setBusy(false); }
-  };
-  const deleteRepo = async () => {
-    if(!selectedRepo) return;
-    if(!confirm(`Permanently delete ${selectedRepo.full_name}? This cannot be undone.`)) return;
-    setBusy(true);
-    try { await api(`/repos/${selectedRepo.full_name}`,settings.githubToken,{method:'DELETE'}); setRepos(r=>r.filter(x=>x.full_name!==selected)); log(`Deleted ${selected}`); setSelected(''); toast('success','Repository deleted.'); }
-    catch(e){toast('error',e.message)} finally{setBusy(false)}
-  };
-  const pushProject = async () => {
-    if(!settings.githubToken) return toast('error','Connect GitHub in Settings first.');
-    if(!selectedRepo) return toast('error','Select a repository first.');
-    if(!files.length) return toast('error','Import a ZIP project first.');
-    setBusy(true);
-    try {
-      const repo = await api(`/repos/${selectedRepo.full_name}`,settings.githubToken);
-      const defaultBranch = repo.default_branch || branch || 'main';
-      let sha = null;
-      try { const ref=await api(`/repos/${selectedRepo.full_name}/git/ref/heads/${encodeURIComponent(defaultBranch)}`,settings.githubToken); sha=ref.object.sha; } catch {}
-      const baseTree = sha ? (await api(`/repos/${selectedRepo.full_name}/git/commits/${sha}`,settings.githubToken)).tree.sha : null;
-      const tree = [];
-      setPushProgress(0);
-      for(let i=0;i<files.length;i++){
-        const f=files[i];
-        setPushProgress(Math.round((i / Math.max(files.length,1)) * 85));
-        const blob=await api(`/repos/${selectedRepo.full_name}/git/blobs`,settings.githubToken,{method:'POST',body:JSON.stringify({content:bytesToBase64(f.bytes),encoding:'base64'})});
-        tree.push({path:f.path,mode:'100644',type:'blob',sha:blob.sha});
-        if(i%5===0) log(`Uploading file ${i+1}/${files.length}`);
-      }
-      const treeObj=await api(`/repos/${selectedRepo.full_name}/git/trees`,settings.githubToken,{method:'POST',body:JSON.stringify({base_tree:baseTree,tree})});
-      const commit=await api(`/repos/${selectedRepo.full_name}/git/commits`,settings.githubToken,{method:'POST',body:JSON.stringify({message:`Upload project via Dev Style Studio (${new Date().toISOString().slice(0,10)})`,tree:treeObj.sha,...(sha?{parents:[sha]}:{})})});
-      if(sha) await api(`/repos/${selectedRepo.full_name}/git/refs/heads/${encodeURIComponent(defaultBranch)}`,settings.githubToken,{method:'PATCH',body:JSON.stringify({sha:commit.sha,force:false})});
-      else await api(`/repos/${selectedRepo.full_name}/git/refs`,settings.githubToken,{method:'POST',body:JSON.stringify({ref:`refs/heads/${defaultBranch}`,sha:commit.sha})});
-      setPushProgress(100); setPipelineStage('build');
-      log(`Pushed ${files.length} files to ${selectedRepo.full_name}`);
-      toast('success',`Push complete: ${files.length} files`);
-      // Continue the automation: find a workflow that supports manual dispatch and start it.
-      try {
-        const wfData = await api(`/repos/${selectedRepo.full_name}/actions/workflows?per_page=100`, settings.githubToken);
-        const available = wfData.workflows || [];
-        setWorkflows(available);
-        const target = available.find(w => w.state === 'active' && Array.isArray(w.events) && w.events.includes('workflow_dispatch') && (w.name || '').toLowerCase().match(/apk|android|build|release/)) || available.find(w => w.state === 'active' && Array.isArray(w.events) && w.events.includes('workflow_dispatch'));
-        if (target) {
-          setWorkflowId(String(target.id));
-          const ref = selectedRepo.default_branch || 'main';
-          await api(`/repos/${selectedRepo.full_name}/actions/workflows/${target.id}/dispatches`, settings.githubToken, {method:'POST', body:JSON.stringify({ref})});
-          setBuildStartedAt(Date.now()); setElapsed(0); setBuildBusy(true); setPipelineStage('build');
-          log(`Automatically triggered workflow: ${target.name}`);
-          toast('success', `Build started: ${target.name}`);
-        } else {
-          toast('error','Files pushed, but no active workflow was found. Add a GitHub Actions build YAML to the repository.');
-        }
-      } catch (wfError) {
-        log(`Build trigger needs attention: ${wfError.message}`);
-        toast('error',`Files pushed; build trigger failed: ${wfError.message}`);
-      }
-    } catch(e){toast('error',`Push failed: ${e.message}`);log(`ERROR: ${e.message}`)}
-    finally{setBusy(false)}
-  };
-
-  const loadBuildData = async (repoName=selected) => {
-    if(!settings.githubToken || !repoName) return;
-    try {
-      const [wf, rr, aa] = await Promise.all([
-        api(`/repos/${repoName}/actions/workflows?per_page=100`, settings.githubToken),
-        api(`/repos/${repoName}/actions/runs?per_page=8`, settings.githubToken),
-        api(`/repos/${repoName}/actions/artifacts?per_page=20`, settings.githubToken)
-      ]);
-      const list = wf.workflows || [];
-      setWorkflows(list);
-      if(list.length && !list.some(w => String(w.id) === String(workflowId))) setWorkflowId(String(list[0].id));
-      setRuns(rr.workflow_runs || []);
-      setArtifacts((aa.artifacts || []).filter(a => !a.expired));
-    } catch(e) { toast('error', `Could not load Actions data: ${e.message}`); }
-  };
-  const startBuild = async () => {
-    if(!selectedRepo) return toast('error', 'Select a repository first.');
-    if(!settings.githubToken) return toast('error', 'Save GitHub token in Settings first.');
-    if(!workflowId) return toast('error', 'No workflow found. Add a workflow YAML with workflow_dispatch first.');
-    setBuildBusy(true); setPipelineStage('build'); setBuildStartedAt(Date.now()); setElapsed(0); setGeminiReport('');
-    try {
-      const ref = selectedRepo.default_branch || 'main';
-      await api(`/repos/${selectedRepo.full_name}/actions/workflows/${workflowId}/dispatches`, settings.githubToken, {
-        method:'POST', body:JSON.stringify({ref})
-      });
-      log(`Build dispatched for ${selectedRepo.full_name} (${ref})`);
-      toast('success', 'Build workflow started.');
-    } catch(e) { setBuildBusy(false); toast('error', `Build start failed: ${e.message}`); }
-  };
-  useEffect(() => {
-    if(!buildBusy) return;
-    const timer = setInterval(async () => {
-      setElapsed(Math.floor((Date.now() - (buildStartedAt || Date.now())) / 1000));
-      if(!selectedRepo) return;
-      try {
-        const d = await api(`/repos/${selectedRepo.full_name}/actions/runs?per_page=5`, settings.githubToken);
-        const list = d.workflow_runs || []; setRuns(list);
-        if(list[0]?.status === 'completed' && buildStartedAt && new Date(list[0].created_at).getTime() >= buildStartedAt - 5000) {
-          setBuildBusy(false);
-          setPipelineStage(list[0].conclusion === 'success' ? 'result' : 'ai');
-          await loadBuildData(selectedRepo.full_name);
-          toast(list[0].conclusion === 'success' ? 'success' : 'error',
-            list[0].conclusion === 'success' ? 'Build succeeded. Check artifacts below.' : 'Build failed. Gemini can analyze the error.');
-        }
-      } catch {}
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [buildBusy, buildStartedAt, selected, settings.githubToken]);
-  const downloadArtifact = async (artifact) => {
-    try {
-      const r = await fetch(`https://api.github.com/repos/${selectedRepo.full_name}/actions/artifacts/${artifact.id}/zip`, {
-        headers:{Authorization:`Bearer ${settings.githubToken}`, Accept:'application/vnd.github+json'}
-      });
-      if(!r.ok) throw new Error(`Artifact download failed (${r.status})`);
-      const blob = await r.blob(), url = URL.createObjectURL(blob), a = document.createElement('a');
-      a.href = url; a.download = `${artifact.name}.zip`; a.click(); URL.revokeObjectURL(url);
-      toast('success', 'Artifact download started.');
-    } catch(e) { toast('error', `${e.message}. Open the run on GitHub to download the artifact there.`); }
-  };
-  const analyzeBuildError = async () => {
-    if(!settings.geminiKey?.trim()) return toast('error', 'Add a Gemini API key in Settings first.');
-    if(!selectedRepo || !runs.length) return toast('error', 'No build run found.');
-    setBusy(true); setGeminiReport('');
-    try {
-      const run = runs[0];
-      let logText = `Workflow: ${run.name}\nStatus: ${run.status}\nConclusion: ${run.conclusion}\nRun URL: ${run.html_url}\n`;
-      try {
-        const lr = await fetch(`https://api.github.com/repos/${selectedRepo.full_name}/actions/runs/${run.id}/logs`, {
-          headers:{Authorization:`Bearer ${settings.githubToken}`, Accept:'application/vnd.github+json'}
-        });
-        if(lr.ok) {
-          const z = await JSZip.loadAsync(await lr.blob());
-          for(const [name, item] of Object.entries(z.files)) if(!item.dir) {
-            logText += `\n--- ${name} ---\n${(await item.async('string')).slice(-7000)}\n`;
-            if(logText.length > 20000) break;
-          }
-        }
-      } catch { logText += '\nCould not fetch full logs from this browser; inspect the run URL for full output.'; }
-      const gr = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(settings.geminiKey.trim())}`, {
-        method:'POST', headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({contents:[{parts:[{text:`Analyze this GitHub Actions build failure. Explain likely root cause and exact safe changes/commands to fix it. Do not claim you changed files or pushed a fix.\n\n${logText.slice(0,22000)}`}]}]})
-      });
-      const gd = await gr.json();
-      if(!gr.ok) throw new Error(gd.error?.message || `Gemini API error (${gr.status})`);
-      setGeminiReport(gd.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('\n') || 'Gemini returned no report.');
-    } catch(e) { toast('error', e.message); }
-    finally { setBusy(false); }
-  };
-
-  const connectVercel = async () => {
-    if(!settings.vercelToken?.trim()) return toast('error','Add a Vercel token in Settings first.');
-    setBusy(true);
-    try {
-      const r=await fetch('https://api.vercel.com/v9/projects?limit=1',{headers:{Authorization:`Bearer ${settings.vercelToken.trim()}`}});
-      if(!r.ok) throw new Error((await r.json().catch(()=>({}))).error?.message || `Vercel API error (${r.status})`);
-      setVercelStatus('Connected'); setSettings(s=>({...s,vercelToken:s.vercelToken.trim()})); toast('success','Vercel token verified.');
-    }catch(e){setVercelStatus('Not connected');toast('error',e.message)}finally{setBusy(false)}
-  };
-  return <div className="app-shell">
-    <main className="main-area">
-      <header className="topbar"><button className="mobile-menu icon-btn" onClick={()=>setMobileNav(!mobileNav)}><Menu/></button><div><div className="eyebrow">MOBILE DEVELOPMENT WORKSPACE</div><h1><span>DEV</span> STYLE Studio</h1><p>One step at a time · ZIP → GitHub → Build → APK</p></div><button className="settings-top icon-btn" onClick={()=>setShowSettings(true)}><Settings size={19}/></button></header>
-      <section className="automation-shell panel">
-        <div className="automation-head"><div><span className="step-tag">AUTOMATED PROJECT PIPELINE</span><h2>{pipelineStage==='zip'?'Start with your ZIP':pipelineStage==='repo'?'Project extracted':pipelineStage==='push'?'Choose your destination':pipelineStage==='build'?'Build in progress':pipelineStage==='result'?'Build successful':'Build needs attention'}</h2><p>{pipelineStage==='zip'?'Upload once. The workspace will guide you through each next step.':pipelineStage==='repo'?'Your archive is unpacked and the file tree is ready.':pipelineStage==='push'?'Select a GitHub repository, then push the extracted files.':pipelineStage==='build'?'GitHub Actions is processing your project. Watch the live status below.':pipelineStage==='result'?'Your latest build completed. Download the artifact or open the release workflow.':'Gemini can inspect the latest GitHub Actions logs and suggest a fix.'}</p></div><button className="icon-btn" onClick={()=>setShowSettings(true)} title="Settings"><Settings size={18}/></button></div>
-        <div className="pipeline-steps">{[{id:'zip',label:'Upload ZIP'},{id:'repo',label:'Organize files'},{id:'push',label:'Git push'},{id:'build',label:'Build APK'},{id:'result',label:'Artifact'}].map((st,i)=><div key={st.id} className={`pipeline-step ${pipelineStage===st.id?'current':(['repo','push','build','result'].indexOf(pipelineStage)>=['repo','push','build','result'].indexOf(st.id)&&pipelineStage!=='ai'?'done':'')}`}><span>{['repo','push','build','result'].indexOf(pipelineStage)>=i && pipelineStage!=='ai'?'✓':i+1}</span><small>{st.label}</small></div>)}</div>
-        {pipelineStage==='zip'&&<div className="zip-drop"><FileArchive size={35}/><b>Upload project ZIP</b><small>React, Kotlin, Java or Android project archives</small><button className="primary-action big-action" onClick={()=>document.getElementById('zip-input').click()} disabled={busy}><Upload size={18}/>{busy?'Importing ZIP…':'Choose ZIP file'}</button><small>Files are extracted locally; the ZIP itself is not pushed as an archive.</small></div>}
-        {pipelineStage==='repo'&&<div className="stage-card"><div className="stage-card-title"><FolderOpen/><div><b>{zipName||'Imported project'}</b><small>{files.length} extracted files · sorted by path</small></div><button className="text-btn" onClick={()=>setPipelineStage('zip')}>Replace ZIP</button></div><div className="compact-file-tree">{visibleFiles.slice(0,6).map(f=><div className="file-row" key={f.path}><File size={14}/><span>{f.path}</span><small>{f.size<1024?f.size+' B':(f.size/1024).toFixed(1)+' KB'}</small></div>)}{files.length>6&&<small className="muted">+ {files.length-6} more files</small>}</div><div className="stage-actions"><button className="secondary-btn" onClick={()=>setShowSettings(true)}>Connect GitHub</button><button className="primary-action" onClick={()=>{setPipelineStage('push');if(settings.githubToken)loadRepos()}}><Github size={16}/> Continue to repository</button></div></div>}
-        {pipelineStage==='push'&&<div className="stage-card">{busy&&<div className="push-live"><div className="push-live-head"><b>Git push in progress</b><span>{pushProgress}%</span></div><div className="push-track"><i style={{width:`${pushProgress}%`}}/></div><small>Uploading extracted files to the selected repository. Keep this screen open.</small></div>}<label className="stage-label">GitHub repository<select value={selected} onChange={e=>{setSelected(e.target.value);if(e.target.value){setPipelineStage('push');loadBuildData(e.target.value)}}}><option value="">Select a repository…</option>{repos.map(r=><option key={r.id} value={r.full_name}>{r.full_name}</option>)}</select></label><div className="stage-actions"><button className="secondary-btn" onClick={()=>loadRepos()} disabled={busy}><RefreshCw size={15}/> Refresh repos</button><button className="secondary-btn" onClick={()=>setShowCreate(true)}><Plus size={15}/> Create repo</button><button className="primary-action" onClick={pushProject} disabled={busy||!selected||!files.length}><CloudUpload size={16}/>{busy?'Pushing files…':'Push project files'}</button></div><small className="muted">Push sends extracted project files to the selected branch, not the ZIP file.</small></div>}
-        {pipelineStage==='build'&&<div className="stage-card"><div className="build-progress"><div className="progress-spinner"/><div><b>{buildBusy?'GitHub Actions is building':'Ready to trigger GitHub Actions'}</b><small>{buildBusy?`Elapsed time: ${Math.floor(elapsed/60)}m ${elapsed%60}s · auto-checking run status`:'Select a workflow and start the build.'}</small></div></div><label className="stage-label">Workflow<select value={workflowId} onChange={e=>setWorkflowId(e.target.value)}><option value="">Select workflow…</option>{workflows.map(w=><option key={w.id} value={String(w.id)}>{w.name}</option>)}</select></label><div className="stage-actions"><button className="secondary-btn" onClick={()=>loadBuildData()} disabled={busy}><RefreshCw size={15}/> Refresh status</button><button className="primary-action" onClick={startBuild} disabled={busy||buildBusy||!workflowId}><Rocket size={16}/>{buildBusy?'Build running…':'Build APK'}</button></div><small className="muted">The selected repository must contain a GitHub Actions workflow supporting workflow_dispatch.</small></div>}
-        {pipelineStage==='result'&&<div className="stage-card result-card"><CheckCircle2 size={32}/><b>Build completed successfully</b><small>{artifacts.length} available artifact(s). Download the APK package below.</small>{artifacts.map(a=><div className="artifact-row" key={a.id}><PackageCheck/><div className="run-info"><b>{a.name}</b><small>{(a.size_in_bytes/1024/1024).toFixed(1)} MB</small></div><button className="primary-action" onClick={()=>downloadArtifact(a)}><Download size={15}/> Download</button></div>)}<div className="stage-actions"><button className="secondary-btn" onClick={()=>setPipelineStage('build')}>Build again</button><button className="primary-action" onClick={()=>setTab('Deploy')}>Open release & deploy</button></div></div>}
-        {pipelineStage==='ai'&&<div className="stage-card"><div className="ai-heading"><Sparkles/><div><b>Gemini build assistant</b><small>Analyze GitHub Actions logs to identify likely build errors.</small></div></div><button className="primary-action" onClick={analyzeBuildError} disabled={busy}><Sparkles size={16}/>{busy?'Analyzing logs…':'Analyze build error'}</button>{geminiReport&&<pre className="ai-report">{geminiReport}</pre>}<div className="stage-actions"><button className="secondary-btn" onClick={()=>setPipelineStage('build')}>Review build settings</button><button className="primary-action" onClick={()=>setTab('GitHub')}>Open repository</button></div><small className="muted">AI suggestions are not applied or pushed automatically in this version; review generated changes before rebuilding.</small></div>}
-        <input id="zip-input" type="file" accept=".zip,application/zip" hidden onChange={pickZip}/>
-      </section>
-      <div className="content-grid">
-        <section className="work-column">
-          <div className="panel flow-panel">
-            <div className="panel-heading"><div><span className="step-tag">YOUR WORKFLOW</span><h2>Project pipeline</h2></div><span className={`status ${settings.githubToken?'connected':''}`}><i/>{settings.githubToken?'GitHub token saved':'Not connected'}</span></div>
-            <div className="flow-canvas">
-              <div className="flow-row top-flow">
-                <button className="flow-node lime" onClick={()=>document.getElementById('zip-input').click()}><Upload/><b>IMPORT & CREATE</b><small>ZIP project</small></button>
-                <ChevronRight className="flow-arrow"/>
-                <button className="flow-node lime" onClick={()=>document.getElementById('zip-input').click()}><FileArchive/><b>ZIP / SAF</b><small>Import files</small></button>
-                <ChevronRight className="flow-arrow"/>
-                <div className="flow-node pale"><FileCode2/><b>Project files</b><small>React · Kotlin · Java</small></div>
-              </div>
-              <div className="flow-down"><span>↓</span></div>
-              <div className="core-box"><div className="core-label">CORE IDE WORKSPACE</div>
-                <div className="core-row"><button className="flow-node ai-node" onClick={()=>toast('info','AI scanner is a UI placeholder in this starter build.')}><Sparkles/><b>AI ASSISTANT</b><small>Project scanner</small></button><button className="flow-node lime" onClick={()=>setTab('Projects')}><Pencil/><b>CODE PROJECT</b><small>Browse imported files</small></button><div className="preview-card"><PanelsTopLeft/><b>Project workspace</b><small>{files.length} files ready</small><div className="preview-pills"><span>ZIP</span><span>GitHub API</span><span>Android</span></div></div></div>
-              </div>
-              <div className="branch-lines"><span/><span/></div>
-              <div className="bottom-modules"><button className="module-card" onClick={()=>setTab('GitHub')}><Github/><b>GitHub Manager</b><small>Repos · Push · Pull</small></button><button className="module-card" onClick={()=>setTab('Deploy')}><Rocket/><b>Deployment Adapter</b><small>Vercel · projects</small></button></div>
-            </div>
-            <div className="action-bar"><button className="primary-action" onClick={()=>document.getElementById('zip-input').click()}><Upload size={17}/> Import ZIP</button><button onClick={()=>setTab('Projects')}><Search size={17}/> Browse files</button><button onClick={pushProject} disabled={busy}><CloudUpload size={17}/> Push to GitHub</button><button onClick={()=>setShowSettings(true)}><Settings size={17}/> Settings</button></div>
-          </div>
-          <div className={`lower-grid ${tab==="Projects" ? "projects-only" : tab==="GitHub" ? "github-only" : tab!=="Workspace" ? "stage-hidden" : ""}`}>
-            <section className="panel repo-panel"><div className="panel-heading"><div><span className="step-tag">SOURCE CONTROL</span><h2>Repository manager</h2></div><button className="small-icon" onClick={()=>loadRepos()} disabled={busy}><RefreshCw size={16}/></button></div>
-              <div className="repo-toolbar"><select value={selected} onChange={e=>{setSelected(e.target.value);if(e.target.value)loadBuildData(e.target.value)}}><option value="">Select a repository…</option>{repos.map(r=><option key={r.id} value={r.full_name}>{r.full_name}{r.private?' · private':''}</option>)}</select><button className="square-btn" onClick={()=>setShowCreate(true)} title="Create repository"><Plus size={17}/></button></div>
-              {selectedRepo?<div className="selected-repo"><div className="repo-icon"><Github/></div><div className="repo-meta"><b>{selectedRepo.full_name}</b><small>{selectedRepo.private?'Private':'Public'} · {selectedRepo.default_branch||'main'} branch</small></div><button className="small-icon danger" onClick={deleteRepo} title="Delete repository"><Trash2 size={16}/></button></div>:<div className="empty-state"><FolderOpen size={26}/><b>No repository selected</b><small>Connect GitHub, then select or create a repo.</small></div>}
-              <div className="repo-buttons"><button onClick={()=>loadRepos()} disabled={busy}><RefreshCw size={15}/> Refresh repos</button><button className="primary-action" onClick={pushProject} disabled={busy}><CloudUpload size={15}/> Push project</button></div>
-            </section>
-            <section className="panel files-panel"><div className="panel-heading"><div><span className="step-tag">PROJECT CONTENTS</span><h2>Imported files <span className="count">{files.length}</span></h2></div><FileCode2 size={20}/></div><div className="file-search"><Search size={15}/><input value={filter} onChange={e=>setFilter(e.target.value)} placeholder="Filter file paths…"/></div>
-              <div className="file-list">{visibleFiles.length?visibleFiles.map(f=><div className="file-row" key={f.path}><File size={15}/><span title={f.path}>{f.path}</span><small>{f.size<1024?`${f.size} B`:`${(f.size/1024).toFixed(1)} KB`}</small></div>):<div className="empty-state compact"><FileArchive size={24}/><b>{files.length?'No matching files':'Import a ZIP to begin'}</b><small>Files are unpacked locally in this workspace.</small></div>}</div>
-              {files.length>120&&<small className="muted">Showing first 120 matching files.</small>}
-            </section>
-          </div>
-        </section>
-        <aside className={`right-panel panel ${tab!=="Workspace" ? "stage-hidden" : ""}`}>
-          <button className="right-title" onClick={()=>setExpanded(!expanded)}><ChevronDown className={expanded?'':'rotated'}/><span>Application modules</span><span className="module-count">05</span></button>
-          {expanded&&<div className="module-list">
-            <div className="module-item"><div className="module-icon"><GitBranch/></div><div><b>GitHub Repository Manager</b><small>List, create, delete and push project files.</small></div><CheckCircle2 className="module-check"/></div>
-            <div className="module-item"><div className="module-icon"><Smartphone/></div><div><b>ZIP / SAF Import</b><small>Unpack a ZIP and inspect its file tree.</small></div><CheckCircle2 className="module-check"/></div>
-            <div className="module-item"><div className="module-icon"><ShieldCheck/></div><div><b>Token settings</b><small>GitHub and Vercel API connectivity.</small></div><CheckCircle2 className="module-check"/></div>
-            <div className="module-item"><div className="module-icon"><Rocket/></div><div><b>Vercel connection</b><small>{vercelStatus||'Token verification available in Settings.'}</small></div><span className={`dot-status ${vercelStatus==='Connected'?'ok':''}`}/></div>
-            <div className="module-item"><div className="module-icon"><Terminal/></div><div><b>Build activity</b><small>Recent local workspace events.</small></div></div>
-          </div>}
-          <div className="activity"><div className="activity-head"><b>Activity log</b><button onClick={()=>setLogs([])} className="text-btn">Clear</button></div>{logs.map((l,i)=><div className="log-row" key={i}><span className="log-dot"/><span>{l}</span></div>)}</div>
-          <div className="security-note"><ShieldCheck size={17}/><div><b>Token safety</b><p>Use a fine-grained token with only the repository permissions you need. Never share screenshots containing tokens.</p></div></div>
-        </aside>
-      </div>
-      {tab==='Deploy'&&<section className="panel build-page">
-        <div className="panel-heading"><div><span className="step-tag">BUILD PIPELINE</span><h2>Build & APK artifacts</h2></div><button className="small-icon" onClick={()=>loadBuildData()} disabled={busy}><RefreshCw size={16}/></button></div>
-        {!selectedRepo?<div className="empty-state"><Github size={28}/><b>Select a GitHub repository first</b><small>Go to GitHub and select the project repository.</small><button className="primary-action" onClick={()=>setTab('GitHub')}>Open repository manager</button></div>:<>
-          <div className="build-repo"><Github size={18}/><div><b>{selectedRepo.full_name}</b><small>Run a workflow already present in this repository.</small></div></div>
-          <div className="build-controls"><label>GitHub Actions workflow<select value={workflowId} onChange={e=>setWorkflowId(e.target.value)}><option value="">Select workflow…</option>{workflows.map(w=><option key={w.id} value={String(w.id)}>{w.name} · {w.state}</option>)}</select></label><button className="secondary-btn" onClick={()=>loadBuildData()} disabled={busy}><RefreshCw size={15}/> Refresh</button><button className="primary-action" onClick={startBuild} disabled={busy||buildBusy}><Rocket size={16}/>{buildBusy?'Build running…':'Build APK'}</button></div>
-          {buildBusy&&<div className="build-progress"><div className="progress-spinner"/><div><b>GitHub Actions is building</b><small>Elapsed time: {Math.floor(elapsed/60)}m {elapsed%60}s · checking every 5 seconds</small></div></div>}
-          <div className="build-section-title"><b>Recent runs</b><span className="count">{runs.length}</span></div>
-          {runs.length?runs.map(r=><div className="run-row" key={r.id}><div className={`run-state ${r.conclusion==='success'?'ok':r.conclusion==='failure'?'fail':''}`}>{r.conclusion==='success'?<CheckCircle2/>:r.conclusion==='failure'?<CircleAlert/>:<Terminal/>}</div><div className="run-info"><b>{r.name||'GitHub Actions build'}</b><small>#{r.run_number} · {r.status==='in_progress'?'In progress':r.conclusion||r.status} · {r.head_branch}</small></div><a href={r.html_url} target="_blank" rel="noreferrer">Open logs <ExternalLink size={13}/></a></div>):<div className="empty-state compact"><Terminal/><b>No workflow runs loaded</b><small>Refresh to check existing runs.</small></div>}
-          <div className="build-section-title"><b>APK / build artifacts</b><span className="count">{artifacts.length}</span></div>
-          {artifacts.length?artifacts.map(a=><div className="artifact-row" key={a.id}><div className="artifact-icon"><PackageCheck/></div><div className="run-info"><b>{a.name}</b><small>Expires: {new Date(a.expires_at).toLocaleDateString()} · {(a.size_in_bytes/1024/1024).toFixed(1)} MB</small></div><button className="small-icon" onClick={()=>downloadArtifact(a)} title="Download artifact"><Download size={16}/></button></div>):<div className="empty-inline">No unexpired artifacts found for this repository.</div>}
-          {runs[0]?.conclusion==='failure'&&<div className="ai-fix-card"><div className="ai-heading"><Sparkles/><div><b>Gemini build assistant</b><small>Analyze the latest failed run and suggest a fix.</small></div></div><button className="primary-action" onClick={analyzeBuildError} disabled={busy}><Sparkles size={15}/>{busy?'Analyzing logs…':'Analyze build error'}</button>{geminiReport&&<pre className="ai-report">{geminiReport}</pre>}</div>}
-        </>}
-      </section>}
-
-      <footer><span>DEV STYLE STUDIO <i>•</i> Mobile-first developer workspace</span><span>Local workspace <b>●</b></span></footer>
-    </main>
-    {showSettings&&<div className="modal-backdrop" onClick={()=>setShowSettings(false)}><section className="modal" onClick={e=>e.stopPropagation()}><div className="modal-head"><div><span className="step-tag">ACCOUNT CONNECTIONS</span><h2>Settings & access</h2><p>Credentials stay in this app's local browser storage.</p></div><button className="icon-btn" onClick={()=>setShowSettings(false)}><X/></button></div>
-      <label>GitHub username <input value={settings.githubUsername||owner} onChange={e=>setSettings(s=>({...s,githubUsername:e.target.value}))} placeholder="your-github-username"/></label>
-      <label>GitHub access token <div className="token-field"><KeyRound size={16}/><input type={showToken?'text':'password'} value={settings.githubToken||''} onChange={e=>setSettings(s=>({...s,githubToken:e.target.value}))} placeholder="github_pat_…"/><button onClick={()=>setShowToken(!showToken)}>{showToken?<EyeOff size={16}/>:<Eye size={16}/>}</button></div></label>
-      <div className="hint-box"><ShieldCheck size={17}/><span>Fine-grained token: grant access only to selected repositories and Contents (read/write). Repository administration is needed for create/delete actions.</span></div>
-      <label>Vercel access token <div className="token-field"><KeyRound size={16}/><input type="password" value={settings.vercelToken||''} onChange={e=>setSettings(s=>({...s,vercelToken:e.target.value}))} placeholder="Vercel token"/></div></label>
-      <label>Vercel team / scope (optional) <input value={settings.vercelScope||''} onChange={e=>setSettings(s=>({...s,vercelScope:e.target.value}))} placeholder="team_xxx or personal account"/></label>
-      <label>Gemini API key <div className="token-field"><Sparkles size={16}/><input type="password" value={settings.geminiKey||''} onChange={e=>setSettings(s=>({...s,geminiKey:e.target.value}))} placeholder="Gemini API key for build-error analysis"/></div></label>
-      <div className="modal-actions"><button onClick={()=>{setSettings({});setOwner('');setRepos([]);setSelected('');localStorage.removeItem(STORE);toast('success','Saved credentials cleared.')}} className="secondary-btn">Clear saved tokens</button><button onClick={saveSettings} className="primary-action" disabled={busy}>{busy?'Checking…':'Save & connect GitHub'}</button><button onClick={connectVercel} className="secondary-btn" disabled={busy}>Verify Vercel</button></div>
-      <p className="fineprint">Security note: this client-only starter stores tokens in WebView localStorage, which is not encrypted. Use a dedicated token, never commit it, and revoke it when finished. For production, replace this with Android Keystore-backed native storage.</p>
-    </section></div>}
-    {showCreate&&<div className="modal-backdrop" onClick={()=>setShowCreate(false)}><section className="modal small-modal" onClick={e=>e.stopPropagation()}><div className="modal-head"><div><span className="step-tag">NEW PROJECT REPOSITORY</span><h2>Create repository</h2></div><button className="icon-btn" onClick={()=>setShowCreate(false)}><X/></button></div><label>Repository name<input value={newRepo} onChange={e=>setNewRepo(e.target.value)} placeholder="my-android-project"/></label><label className="check-label"><input type="checkbox" checked={isPrivate} onChange={e=>setIsPrivate(e.target.checked)}/> Keep repository private</label><div className="modal-actions"><button className="secondary-btn" onClick={()=>setShowCreate(false)}>Cancel</button><button className="primary-action" onClick={createRepo} disabled={busy}>{busy?'Creating…':'Create repository'}</button></div></section></div>}
-    {notice&&<div className={`toast ${notice.type}`}><span>{notice.type==='error'?<CircleAlert size={18}/>:<CheckCircle2 size={18}/>}</span>{notice.text}<button onClick={()=>setNotice(null)}><X size={15}/></button></div>}
-  </div>;
-};
+const STORE='dss_settings_v1';
+const readSettings=()=>{try{return JSON.parse(localStorage.getItem(STORE)||'{}')}catch{return {}}};
+const api=async(path,token,options={})=>{const res=await fetch(`https://api.github.com${path}`,{...options,headers:{Accept:'application/vnd.github+json',...(token?{Authorization:`Bearer ${token}`} : {}),...(options.body?{'Content-Type':'application/json'}:{}),...options.headers}});const data=res.status===204?null:await res.json().catch(()=>({}));if(!res.ok)throw new Error(data?.message||`GitHub API error (${res.status})`);return data};
+const bytesToBase64=bytes=>{let binary='';for(let i=0;i<bytes.length;i+=0x8000)binary+=String.fromCharCode(...bytes.subarray(i,i+0x8000));return btoa(binary)};
+const safeName=s=>(s||'project').toLowerCase().replace(/[^a-z0-9-]/g,'-').replace(/^-+|-+$/g,'').slice(0,90)||'project';
+function App(){
+ const [settings,setSettings]=useState(readSettings),[showSettings,setShowSettings]=useState(false),[showToken,setShowToken]=useState(false);
+ const [stage,setStage]=useState('upload'),[busy,setBusy]=useState(false),[notice,setNotice]=useState(null),[zipName,setZipName]=useState(''),[files,setFiles]=useState([]),[fileFilter,setFileFilter]=useState(''),[zipBytes,setZipBytes]=useState(0);
+ const [repos,setRepos]=useState([]),[selected,setSelected]=useState(''),[showCreate,setShowCreate]=useState(false),[newRepo,setNewRepo]=useState(''),[privateRepo,setPrivateRepo]=useState(true),[owner,setOwner]=useState('');
+ const [pushProgress,setPushProgress]=useState(0),[pushLabel,setPushLabel]=useState(''),[workflows,setWorkflows]=useState([]),[workflowId,setWorkflowId]=useState(''),[runs,setRuns]=useState([]),[artifacts,setArtifacts]=useState([]),[buildBusy,setBuildBusy]=useState(false),[buildStarted,setBuildStarted]=useState(0),[elapsed,setElapsed]=useState(0),[aiBusy,setAiBusy]=useState(false),[aiReport,setAiReport]=useState(''),[retryCount,setRetryCount]=useState(0),[liveUrl,setLiveUrl]=useState(''),[projectType,setProjectType]=useState('unknown'),[activity,setActivity]=useState([]);
+ const selectedRepo=repos.find(r=>r.full_name===selected);const filteredFiles=useMemo(()=>files.filter(f=>f.path.toLowerCase().includes(fileFilter.toLowerCase())).slice(0,100),[files,fileFilter]);
+ const log=m=>setActivity(a=>[{id:Date.now()+Math.random(),time:new Date().toLocaleTimeString(),message:m},...a].slice(0,6));
+ const toast=(type,message)=>{setNotice({type,message});setTimeout(()=>setNotice(null),4500)};
+ useEffect(()=>{localStorage.setItem(STORE,JSON.stringify(settings))},[settings]);
+ const githubReady=!!settings.githubToken;
+ const saveSettings=async()=>{if(!settings.githubToken?.trim()){toast('error','GitHub token যোগ করো।');return}setBusy(true);try{const u=await api('/user',settings.githubToken.trim());setOwner(u.login);setSettings(s=>({...s,githubToken:s.githubToken.trim(),githubUsername:u.login}));const rr=await api(`/users/${encodeURIComponent(u.login)}/repos?per_page=100&sort=updated`,settings.githubToken.trim());setRepos(rr);toast('success',`GitHub connected: @${u.login}`);log(`GitHub connected as @${u.login}`);setShowSettings(false)}catch(e){toast('error',e.message)}finally{setBusy(false)}};
+ const refreshRepos=async()=>{if(!githubReady){setShowSettings(true);toast('error','আগে Settings-এ GitHub token দাও।');return}setBusy(true);try{const u=await api('/user',settings.githubToken);setOwner(u.login);const rr=await api(`/users/${encodeURIComponent(u.login)}/repos?per_page=100&sort=updated`,settings.githubToken);setRepos(rr);log(`${rr.length} repositories loaded`);toast('success','Repository list updated')}catch(e){toast('error',e.message)}finally{setBusy(false)}};
+ const pickZip=async e=>{const f=e.target.files?.[0];if(!f)return;if(f.size>500*1024*1024){toast('error','ZIP সর্বোচ্চ 500 MB হতে পারবে।');e.target.value='';return}setBusy(true);setZipName(f.name);setZipBytes(f.size);try{const z=await JSZip.loadAsync(f,{checkCRC32:false});const out=[];let total=0;for(const [path,item] of Object.entries(z.files)){if(item.dir)continue;const clean=path.replace(/^\/+/, '');if(!clean||clean.split('/').includes('..')||clean.split('/').some(p=>p==='.git'||p==='node_modules'))continue;const bytes=await item.async('uint8array');total+=bytes.byteLength;if(total>1024*1024*1024)throw new Error('Extracted project exceeds 1 GB safety limit.');out.push({path:clean,bytes,size:bytes.byteLength})}if(!out.length)throw new Error('ZIP-এ ব্যবহারযোগ্য ফাইল পাওয়া যায়নি।');const pkg=out.find(x=>/(^|\/)package\.json$/i.test(x.path));const html=out.some(x=>/(^|\/)index\.html$/i.test(x.path));const androidGradle=out.some(x=>/(^|\/)(gradlew|settings\.gradle(\.kts)?|build\.gradle(\.kts)?|AndroidManifest\.xml)$/i.test(x.path));let type='unknown';if(pkg){try{const j=JSON.parse(new TextDecoder().decode(pkg.bytes));type=(j.dependencies?.vite||j.devDependencies?.vite||j.dependencies?.react||j.devDependencies?.react)?'web':'unknown'}catch{type='web'}}else if(html)type='static';else if(androidGradle)type='android';if(type==='android'&&androidGradle&&!out.some(x=>/^\.github\/workflows\/[^/]+\.ya?ml$/i.test(x.path))){const workflow=`name: Android APK Build\non:\n  workflow_dispatch:\n  push:\n    branches: [main, master]\npermissions:\n  contents: read\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4\n      - uses: actions/setup-java@v4\n        with:\n          distribution: temurin\n          java-version: 17\n      - name: Build debug APK\n        run: |\n          WRAPPER=$(find . -type f -name gradlew -not -path './.git/*' -print -quit);\n          if [ -z "$WRAPPER" ]; then echo 'Gradle wrapper not found'; exit 1; fi;\n          PROJECT_DIR=$(dirname "$WRAPPER"); cd "$PROJECT_DIR"; chmod +x ./gradlew; ./gradlew assembleDebug --no-daemon\n      - name: Upload APK artifact\n        uses: actions/upload-artifact@v4\n        with:\n          name: android-debug-apk\n          path: |\n            **/build/outputs/apk/**/*.apk\n          if-no-files-found: error\n          retention-days: 14\n`;out.push({path:'.github/workflows/android-build.yml',bytes:new TextEncoder().encode(workflow),size:new TextEncoder().encode(workflow).byteLength});}setProjectType(type);setFiles(out.sort((a,b)=>a.path.localeCompare(b.path)));setStage('repo');log(`Unpacked ${out.length} files from ${f.name}`);toast('success',`${out.length} files extracted`)}catch(err){toast('error',`ZIP import failed: ${err.message}`)}finally{setBusy(false);e.target.value=''}};
+ const createRepo=async()=>{if(!newRepo.trim())return toast('error','Repository name লিখো।');setBusy(true);try{const r=await api('/user/repos',settings.githubToken,{method:'POST',body:JSON.stringify({name:newRepo.trim(),private:privateRepo,auto_init:true,description:'Project uploaded with Dev Style Studio'})});setRepos(a=>[r,...a.filter(x=>x.id!==r.id)]);setSelected(r.full_name);setNewRepo('');setShowCreate(false);setStage('push');toast('success','Repository তৈরি হয়েছে');log(`Created ${r.full_name}`)}catch(e){toast('error',e.message)}finally{setBusy(false)}};
+ const deleteRepo=async()=>{if(!selectedRepo)return;if(!window.confirm(`Permanently delete ${selectedRepo.full_name}? This cannot be undone.`))return;setBusy(true);try{await api(`/repos/${selectedRepo.full_name}`,settings.githubToken,{method:'DELETE'});setRepos(a=>a.filter(r=>r.full_name!==selected));setSelected('');toast('success','Repository deleted');log(`Deleted ${selectedRepo.full_name}`)}catch(e){toast('error',e.message)}finally{setBusy(false)}};
+ const commitFiles=async(inputFiles,message)=>{const repo=await api(`/repos/${selected}`,settings.githubToken);const branch=repo.default_branch||'main';let head=null;try{head=await api(`/repos/${selected}/git/ref/heads/${encodeURIComponent(branch)}`,settings.githubToken)}catch{}const parentSha=head?.object?.sha;const baseTree=parentSha?(await api(`/repos/${selected}/git/commits/${parentSha}`,settings.githubToken)).tree.sha:null;const tree=[];for(let i=0;i<inputFiles.length;i++){const f=inputFiles[i];if(f.size>100*1024*1024)throw new Error(`GitHub API cannot upload individual files over 100 MB: ${f.path}`);setPushProgress(Math.round((i+1)/inputFiles.length*90));setPushLabel(`Uploading ${i+1}/${inputFiles.length}: ${f.path}`);const blob=await api(`/repos/${selected}/git/blobs`,settings.githubToken,{method:'POST',body:JSON.stringify({content:bytesToBase64(f.bytes),encoding:'base64'})});tree.push({path:f.path,mode:'100644',type:'blob',sha:blob.sha})}const t=await api(`/repos/${selected}/git/trees`,settings.githubToken,{method:'POST',body:JSON.stringify({...(baseTree?{base_tree:baseTree}:{}),tree})});const c=await api(`/repos/${selected}/git/commits`,settings.githubToken,{method:'POST',body:JSON.stringify({message,tree:t.sha,...(parentSha?{parents:[parentSha]}:{})})});if(parentSha)await api(`/repos/${selected}/git/refs/heads/${encodeURIComponent(branch)}`,settings.githubToken,{method:'PATCH',body:JSON.stringify({sha:c.sha,force:false})});else await api(`/repos/${selected}/git/refs`,settings.githubToken,{method:'POST',body:JSON.stringify({ref:`refs/heads/${branch}`,sha:c.sha})});setPushProgress(100);return {branch,commit:c}};
+ const getBuildData=async()=>{if(!selected)return;const [w,r,a]=await Promise.all([api(`/repos/${selected}/actions/workflows?per_page=100`,settings.githubToken),api(`/repos/${selected}/actions/runs?per_page=10`,settings.githubToken),api(`/repos/${selected}/actions/artifacts?per_page=30`,settings.githubToken)]);setWorkflows(w.workflows||[]);setRuns(r.workflow_runs||[]);setArtifacts((a.artifacts||[]).filter(x=>!x.expired));const target=(w.workflows||[]).find(x=>x.state==='active'&&x.events?.includes('workflow_dispatch')&&/apk|android|build|release/i.test(x.name))||(w.workflows||[]).find(x=>x.state==='active'&&x.events?.includes('workflow_dispatch'));setWorkflowId(target?String(target.id):'');return {workflows:w.workflows||[],runs:r.workflow_runs||[],artifacts:(a.artifacts||[]).filter(x=>!x.expired)}};
+ const push=async()=>{if(!selectedRepo)return toast('error','একটি repository select করো।');if(!files.length)return toast('error','আগে ZIP upload করো।');setBusy(true);setPushProgress(0);setPushLabel('Preparing Git push…');try{await commitFiles(files,`Upload project via Dev Style Studio · ${new Date().toISOString()}`);log(`Pushed ${files.length} files to ${selected}`);toast('success','Git push সফল হয়েছে');const repo=selectedRepo;const data=await getBuildData().catch(()=>null);if(projectType==='web'){setStage('deploy')}else if(projectType==='static'){setStage('pages')}else if(data?.workflows?.length){setStage('build');const target=data.workflows.find(x=>x.state==='active'&&x.events?.includes('workflow_dispatch')&&/apk|android|build|release/i.test(x.name))||data.workflows.find(x=>x.state==='active'&&x.events?.includes('workflow_dispatch'));if(target){setWorkflowId(String(target.id));await api(`/repos/${selected}/actions/workflows/${target.id}/dispatches`,settings.githubToken,{method:'POST',body:JSON.stringify({ref:repo.default_branch||'main'})});setBuildStarted(Date.now());setElapsed(0);setBuildBusy(true);log(`Build workflow triggered: ${target.name}`)}else if(projectType==='android'){setBuildStarted(Date.now());setElapsed(0);setBuildBusy(true);log('Monitoring Android workflow triggered by the push event')}else toast('error','Build workflow আছে, কিন্তু workflow_dispatch নেই।')}else{setStage('build');if(projectType==='android'){setBuildStarted(Date.now());setElapsed(0);setBuildBusy(true);log('Monitoring automatic Android build from push event')}else toast('error','Repository-তে build workflow পাওয়া যায়নি।')}}catch(e){toast('error',e.message);log(`Push failed: ${e.message}`)}finally{setBusy(false)}};
+ const triggerBuild=async()=>{if(!selected||!workflowId)return toast('error','workflow নির্বাচন করো।');setBusy(true);try{const repo=await api(`/repos/${selected}`,settings.githubToken);await api(`/repos/${selected}/actions/workflows/${workflowId}/dispatches`,settings.githubToken,{method:'POST',body:JSON.stringify({ref:repo.default_branch||'main'})});setBuildStarted(Date.now());setElapsed(0);setBuildBusy(true);setStage('build');toast('success','Build trigger করা হয়েছে');log('GitHub Actions build started')}catch(e){toast('error',e.message)}finally{setBusy(false)}};
+ useEffect(()=>{if(!buildBusy)return;const t=setInterval(async()=>{setElapsed(Math.floor((Date.now()-buildStarted)/1000));try{const d=await api(`/repos/${selected}/actions/runs?per_page=8`,settings.githubToken);const list=d.workflow_runs||[];setRuns(list);const run=list.find(r=>new Date(r.created_at).getTime()>=buildStarted-8000);if(run?.status==='completed'){setBuildBusy(false);await getBuildData().catch(()=>{});if(run.conclusion==='success'){setStage('result');toast('success','Build সফল হয়েছে—artifact ready')}else{setStage('failed');toast('error','Build failed—AI logs বিশ্লেষণ করছে');if(settings.geminiKey&&retryCount<3)window.setTimeout(()=>fixWithAI(run),900)}log(`Build ${run.conclusion}: ${run.html_url}`)}}catch{}},5000);return()=>clearInterval(t)},[buildBusy,buildStarted,selected,settings.githubToken,retryCount,settings.geminiKey]);
+ const fetchLogs=async run=>{const r=await fetch(`https://api.github.com/repos/${selected}/actions/runs/${run.id}/logs`,{headers:{Authorization:`Bearer ${settings.githubToken}`,Accept:'application/vnd.github+json'}});if(!r.ok)throw new Error('GitHub logs আনতে পারিনি; run page-এ logs দেখো।');const z=await JSZip.loadAsync(await r.blob());let out='';for(const [n,f] of Object.entries(z.files)){if(!f.dir)out+=`\n--- ${n} ---\n${(await f.async('string')).slice(-9000)}\n`;if(out.length>24000)break}return out};
+ const fixWithAI=async(runOverride=null)=>{if(!settings.geminiKey?.trim())return setShowSettings(true),toast('error','Settings-এ Gemini API key দাও।');const run=runOverride||runs.find(x=>x.conclusion==='failure')||runs[0];if(!run)return toast('error','Failed build run পাওয়া যায়নি।');setAiBusy(true);try{const logs=await fetchLogs(run);const context=files.filter(f=>/\.(json|gradle|kts|xml|ya?ml|properties|js|jsx|ts|tsx|html|css)$/i.test(f.path)).slice(0,14);let sources='';for(const f of context){if(f.size<18000)sources+=`\n\nFILE ${f.path}\n${new TextDecoder().decode(f.bytes).slice(0,6000)}`}const prompt=`You are a cautious build-fix agent. Analyze GitHub Actions failure logs and supplied project files. Return ONLY valid JSON: {"summary":"...","changes":[{"path":"existing/relative/file","content":"complete replacement content"}]}. Only modify existing files, max 4 files, never edit secrets, signing keys, credentials, or workflow permissions. If the issue cannot be safely fixed from evidence, return changes: [].\nRUN: ${run.html_url}\nLOGS:\n${logs.slice(0,20000)}\nFILES:${sources.slice(0,22000)}`;const resp=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${encodeURIComponent(settings.geminiKey.trim())}`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({contents:[{parts:[{text:prompt}]}],generationConfig:{responseMimeType:'application/json',temperature:0.1}})});const jd=await resp.json();if(!resp.ok)throw new Error(jd.error?.message||'Gemini request failed');const raw=jd.candidates?.[0]?.content?.parts?.map(p=>p.text||'').join('')||'{}';const result=JSON.parse(raw.replace(/^```json\s*/,'').replace(/```$/,'').trim());setAiReport(result.summary||'AI analysis complete.');if(!result.changes?.length){toast('error','AI নিরাপদে auto-fix তৈরি করতে পারেনি। Report দেখো।');return}const updated=[...files];for(const ch of result.changes){const path=ch.path.replace(/^\/+/, '');const idx=updated.findIndex(f=>f.path===path);if(idx<0)continue;updated[idx]={...updated[idx],bytes:new TextEncoder().encode(ch.content),size:new TextEncoder().encode(ch.content).byteLength}}const changed=updated.filter(f=>{const old=files.find(x=>x.path===f.path);return old&&old.bytes!==f.bytes});if(!changed.length)throw new Error('AI এমন file change দিয়েছে যা existing project-এ মেলেনি.');setFiles(updated);setRetryCount(n=>n+1);setBusy(true);await commitFiles(changed,`AI build fix attempt ${retryCount+1}`);const repo=await api(`/repos/${selected}`,settings.githubToken);const data=await getBuildData();const target=data.workflows.find(w=>w.state==='active'&&w.events?.includes('workflow_dispatch')&&/apk|android|build|release/i.test(w.name))||data.workflows.find(w=>w.state==='active'&&w.events?.includes('workflow_dispatch'));if(!target)throw new Error('Fix pushed, but no manual-dispatch workflow is available.');await api(`/repos/${selected}/actions/workflows/${target.id}/dispatches`,settings.githubToken,{method:'POST',body:JSON.stringify({ref:repo.default_branch||'main'})});setWorkflowId(String(target.id));setBuildStarted(Date.now());setElapsed(0);setBuildBusy(true);setStage('build');log(`AI pushed ${changed.length} file fix(es); build retry started`);toast('success','AI fix push হয়েছে; rebuild চলছে')}catch(e){toast('error',e.message);setAiReport(a=>a||e.message)}finally{setAiBusy(false);setBusy(false)}};
+ const downloadArtifact=async a=>{try{const r=await fetch(`https://api.github.com/repos/${selected}/actions/artifacts/${a.id}/zip`,{headers:{Authorization:`Bearer ${settings.githubToken}`,Accept:'application/vnd.github+json'}});if(!r.ok)throw new Error('Artifact download failed');const blob=await r.blob();const url=URL.createObjectURL(blob);const el=document.createElement('a');el.href=url;el.download=`${a.name}.zip`;el.click();setTimeout(()=>URL.revokeObjectURL(url),1500)}catch(e){toast('error',e.message)}};
+ const deployVercel=async()=>{if(!settings.vercelToken?.trim())return setShowSettings(true),toast('error','Settings-এ Vercel token যোগ করো।');if(!selected)return toast('error','GitHub repository select করো।');setBusy(true);try{const repo=selected.split('/')[1];const name=safeName(repo);const resp=await fetch('https://api.vercel.com/v10/projects',{method:'POST',headers:{Authorization:`Bearer ${settings.vercelToken.trim()}`,'Content-Type':'application/json'},body:JSON.stringify({name,framework:projectType==='web'?'vite':null,gitRepository:{type:'github',repo:selected}})});const data=await resp.json();if(!resp.ok&&data.error?.code!=='PROJECT_ALREADY_EXISTS')throw new Error(data.error?.message||`Vercel API error ${resp.status}`);const url=data.alias?.[0]?`https://${data.alias[0]}`:`https://${name}.vercel.app`;setLiveUrl(url);setStage('live');toast('success','Vercel project configured. First deployment may take a little time.');log(`Vercel project configured: ${url}`)}catch(e){toast('error',`${e.message}. নিশ্চিত করো Vercel-এ GitHub integration connected আছে।`)}finally{setBusy(false)}};
+ const publishPages=async()=>{if(!selected)return;setBusy(true);try{const [o,r]=selected.split('/');const body={source:{branch:selectedRepo?.default_branch||'main',path:'/'}};let res=await fetch(`https://api.github.com/repos/${selected}/pages`,{method:'POST',headers:{Authorization:`Bearer ${settings.githubToken}`,'Content-Type':'application/json',Accept:'application/vnd.github+json'},body:JSON.stringify(body)});let d=await res.json().catch(()=>({}));if(!res.ok&&res.status!==409)throw new Error(d.message||`Pages API error ${res.status}`);if(res.status===409){res=await fetch(`https://api.github.com/repos/${selected}/pages`,{headers:{Authorization:`Bearer ${settings.githubToken}`,Accept:'application/vnd.github+json'}});d=await res.json()}const url=d.html_url||`https://${o}.github.io/${r}/`;setLiveUrl(url);setStage('live');toast('success','GitHub Pages configure হয়েছে; publish হতে কিছুক্ষণ লাগতে পারে।');log(`GitHub Pages URL: ${url}`)}catch(e){toast('error',e.message)}finally{setBusy(false)}};
+ const stageTitle={upload:'Upload your ZIP',repo:'Select repository',push:'Push project files',build:'Build APK',failed:'Build failed',result:'APK ready',deploy:'Deploy with Vercel',pages:'Publish with GitHub Pages',live:'Your project is ready'};
+ return <div className="flow-app"><header className="flow-header"><div className="brand"><span>DEV</span> STYLE Studio</div><div className="header-sub">PROJECT AUTOMATION</div><button className="settings-button" onClick={()=>setShowSettings(true)} aria-label="Settings"><Settings size={19}/></button></header>
+ <main className="flow-main"><div className="stage-count"><span className="pulse-dot"/>{stage==='upload'?'STEP 1 OF 5':stage==='repo'?'STEP 2 OF 5':stage==='push'?'STEP 3 OF 5':['build','failed','result'].includes(stage)?'STEP 4 OF 5':['deploy','pages'].includes(stage)?'STEP 4 OF 5':'COMPLETED'}<span className="type-chip">{projectType==='web'?'WEB APP':projectType==='static'?'STATIC SITE':projectType==='android'?'ANDROID PROJECT':'PROJECT'}</span></div><section className="stage-panel"><div className="stage-heading"><div><div className="kicker">AUTOMATED WORKFLOW</div><h1>{stageTitle[stage]}</h1><p>{stage==='upload'?'Upload once. Everything else appears only when it is needed.':stage==='repo'?'ZIP extracted and organized. Choose where the files should go.':stage==='push'?'Select a destination and send the extracted files to GitHub.':stage==='build'?'GitHub Actions is running. Status refreshes automatically.':stage==='failed'?'Inspect the real build logs and let Gemini attempt a safe code fix.':stage==='result'?'Download the artifact produced by GitHub Actions.':stage==='deploy'?'This looks like a React/Vite website. Configure its Vercel deployment.':stage==='pages'?'This looks like a static HTML/CSS/JS site. Publish it with GitHub Pages.':'Open your published project.'}</p></div></div>
+ {stage==='upload'&&<div className="upload-zone"><div className="upload-glyph"><Upload size={27}/></div><b>Upload project ZIP</b><span>Android · React/Vite · HTML/CSS/JS</span><button className="primary large" onClick={()=>document.getElementById('zip-file').click()} disabled={busy}><Upload size={17}/>{busy?'Unpacking ZIP…':'Choose ZIP file'}</button><small>Maximum ZIP size: 500 MB</small><input id="zip-file" type="file" accept=".zip,application/zip" hidden onChange={pickZip}/></div>}
+ {stage==='repo'&&<div className="content-step"><div className="file-summary"><div className="file-symbol"><FolderTree/></div><div className="grow"><b>{zipName}</b><small>{files.length} files · {(zipBytes/1024/1024).toFixed(1)} MB ZIP · extracted and sorted</small></div><button className="mini-icon" onClick={()=>setStage('upload')} title="Replace ZIP"><RotateCw size={16}/></button></div><div className="file-preview"><div className="preview-head"><span>PROJECT FILES</span><span>{files.length} files</span></div>{filteredFiles.slice(0,5).map(f=><div className="file-line" key={f.path}><File size={14}/><span title={f.path}>{f.path}</span><small>{f.size<1024?`${f.size} B`:`${(f.size/1024).toFixed(1)} KB`}</small></div>)}</div><label className="field-label">GitHub repository<select value={selected} onChange={e=>setSelected(e.target.value)}><option value="">Select a repository…</option>{repos.map(r=><option key={r.id} value={r.full_name}>{r.full_name}</option>)}</select></label><div className="button-row"><button className="secondary" onClick={refreshRepos} disabled={busy}><RefreshCw size={15}/> Refresh</button><button className="secondary" onClick={()=>setShowCreate(true)}><Plus size={15}/> Create repo</button></div>{selected&&<div className="repo-actions"><button className="text-action" onClick={()=>window.open(`https://github.com/${selected}`,'_blank','noopener')}><ExternalLink size={14}/> Open repository</button><button className="text-action danger" onClick={deleteRepo} disabled={busy}><Trash2 size={14}/> Delete selected repo</button></div>}<button className="primary full" onClick={()=>setStage('push')} disabled={!selected}><ChevronRight size={17}/> Continue</button><small className="help-text">Need a token? Open Settings using the gear icon.</small></div>}
+ {stage==='push'&&<div className="content-step"><div className="selected-repo"><Github size={21}/><div className="grow"><b>{selected}</b><small>Extracted files will be committed to this repository.</small></div><button className="mini-icon" onClick={()=>window.open(`https://github.com/${selected}`,'_blank','noopener')} title="Open repo"><ExternalLink size={16}/></button></div>{busy&&<div className="progress-card"><div className="progress-top"><b>{pushLabel||'Pushing files…'}</b><strong>{pushProgress}%</strong></div><div className="progress-track"><i style={{width:`${pushProgress}%`}}/></div><small>Do not close the app until the push completes.</small></div>}<button className="primary full" onClick={push} disabled={busy||!selected}><CloudUpload size={17}/>{busy?'Pushing project…':'Git Push'}</button><button className="secondary full" onClick={()=>setStage('repo')}><ChevronRight className="back-arrow" size={16}/> Back to repository</button><div className="repo-actions"><button className="text-action" onClick={()=>window.open(`https://github.com/${selected}`,'_blank','noopener')}><ExternalLink size={14}/> Open repository</button><button className="text-action danger" onClick={deleteRepo} disabled={busy}><Trash2 size={14}/> Delete repo</button></div><small className="help-text">ZIP archive is not pushed; the extracted project files are.</small></div>}
+ {stage==='build'&&<div className="content-step"><div className="build-live"><div className="live-icon">{buildBusy?<LoaderCircle className="spin"/>:<Clock3/>}</div><div className="grow"><b>{buildBusy?'GitHub Actions building…':'Build workflow detected'}</b><small>{buildBusy?'Live status is checked every 5 seconds.':'You can start another build or refresh current status.'}</small></div></div><div className="elapsed-box"><span>BUILD TIME</span><strong>{String(Math.floor(elapsed/60)).padStart(2,'0')}:{String(elapsed%60).padStart(2,'0')}</strong><small>minutes : seconds</small></div><label className="field-label">Workflow<select value={workflowId} onChange={e=>setWorkflowId(e.target.value)}><option value="">Select workflow…</option>{workflows.map(w=><option key={w.id} value={String(w.id)}>{w.name}</option>)}</select></label><button className="primary full" onClick={triggerBuild} disabled={busy||buildBusy||!workflowId}><Rocket size={17}/>{buildBusy?'Build running…':'Run build again'}</button><button className="secondary full" onClick={()=>getBuildData().then(()=>toast('success','Build data refreshed')).catch(e=>toast('error',e.message))} disabled={busy}><RefreshCw size={15}/> Refresh build status</button>{runs.slice(0,3).map(r=><div className="run-line" key={r.id}><span className={r.conclusion==='success'?'green-dot':r.conclusion==='failure'?'red-dot':'pulse-dot'}/><div className="grow"><b>{r.name||'GitHub Actions'}</b><small>{r.status==='in_progress'?'In progress':r.conclusion||r.status}</small></div><button className="mini-icon" onClick={()=>window.open(r.html_url,'_blank','noopener')}><ExternalLink size={14}/></button></div>)}</div>}
+ {stage==='failed'&&<div className="content-step"><div className="failed-banner"><CircleAlert/><div><b>Build failed</b><small>Gemini will inspect the run logs and relevant project files.</small></div></div><button className="primary full" onClick={fixWithAI} disabled={aiBusy||busy}><Sparkles size={17}/>{aiBusy?'Analyzing and applying safe fix…':'Fix with AI & rebuild'}</button>{aiReport&&<pre className="ai-report">{aiReport}</pre>}<button className="secondary full" onClick={()=>runs[0]?.html_url&&window.open(runs[0].html_url,'_blank','noopener')}><ExternalLink size={15}/> Open real GitHub logs</button><small className="help-text">AI may decline a fix if logs do not support a safe change. Automatic retries continue through each triggered build; review changes before production use.</small></div>}
+ {stage==='result'&&<div className="content-step"><div className="success-banner"><CheckCircle2/><div><b>Build succeeded</b><small>Artifact generated by GitHub Actions</small></div></div>{artifacts.length?artifacts.map(a=><div className="artifact-line" key={a.id}><PackageCheck/><div className="grow"><b>{a.name}</b><small>{(a.size_in_bytes/1024/1024).toFixed(1)} MB · expires {new Date(a.expires_at).toLocaleDateString()}</small></div><button className="primary small" onClick={()=>downloadArtifact(a)}><Download size={15}/> Download</button></div>):<p className="help-text">No artifact uploaded by workflow. Check the workflow YAML and upload-artifact step.</p>}<button className="secondary full" onClick={()=>setStage('build')}>Build again</button><button className="text-action" onClick={()=>window.open(`https://github.com/${selected}/actions`,'_blank','noopener')}><ExternalLink size={14}/> Open GitHub Actions</button></div>}
+ {stage==='deploy'&&<div className="content-step"><div className="deploy-banner"><Globe/><div><b>Web project detected</b><small>React/Vite or a modern frontend project</small></div></div><button className="primary full" onClick={deployVercel} disabled={busy}><Rocket size={17}/>{busy?'Configuring deployment…':'Deploy with Vercel'}</button><button className="secondary full" onClick={()=>window.open(`https://github.com/${selected}`,'_blank','noopener')}><ExternalLink size={15}/> Open source repository</button><small className="help-text">Vercel must already be connected to your GitHub account. Deployment may take a few minutes after project import.</small></div>}
+ {stage==='pages'&&<div className="content-step"><div className="deploy-banner"><Globe/><div><b>Static website detected</b><small>HTML · CSS · JavaScript</small></div></div><button className="primary full" onClick={publishPages} disabled={busy}><Globe size={17}/>{busy?'Publishing…':'Publish with GitHub Pages'}</button><button className="secondary full" onClick={()=>window.open(`https://github.com/${selected}`,'_blank','noopener')}><ExternalLink size={15}/> Open source repository</button><small className="help-text">The repository needs an index.html at its published root. GitHub Pages availability depends on repository and account settings.</small></div>}
+ {stage==='live'&&<div className="content-step"><div className="success-banner"><CheckCircle2/><div><b>Publish request completed</b><small>Your website URL</small></div></div><a className="live-url" href={liveUrl} target="_blank" rel="noreferrer">{liveUrl}<ExternalLink size={15}/></a><button className="primary full" onClick={()=>window.open(liveUrl,'_blank','noopener')}><Globe size={17}/> Open live website</button><button className="secondary full" onClick={()=>{setStage('upload');setFiles([]);setZipName('');setLiveUrl('')}}>Upload another project</button></div>}
+ </section>
+ {activity.length>0&&<section className="activity-strip"><div className="activity-title"><span>ACTIVITY</span><span>Latest events</span></div>{activity.slice(0,3).map(a=><div className="activity-row" key={a.id}><span className="green-dot"/><span>{a.message}</span><time>{a.time}</time></div>)}</section>}
+ <footer className="flow-footer"><ShieldCheck size={13}/> Tokens are stored locally in this WebView. Use scoped tokens only.</footer></main>
+ {showSettings&&<div className="modal-backdrop" onClick={()=>setShowSettings(false)}><section className="modal settings-modal" onClick={e=>e.stopPropagation()}><div className="modal-head"><div><div className="kicker">CONNECTIONS</div><h2>Settings</h2><p>Only the credentials needed for your workflow.</p></div><button className="mini-icon" onClick={()=>setShowSettings(false)}><X/></button></div><label className="field-label">GitHub access token<div className="token-input"><KeyRound size={15}/><input type={showToken?'text':'password'} value={settings.githubToken||''} onChange={e=>setSettings(s=>({...s,githubToken:e.target.value}))} placeholder="github_pat_…"/><button onClick={()=>setShowToken(v=>!v)}>{showToken?<EyeOff size={15}/>:<Eye size={15}/>}</button></div></label><label className="field-label">Gemini API key<div className="token-input"><Sparkles size={15}/><input type="password" value={settings.geminiKey||''} onChange={e=>setSettings(s=>({...s,geminiKey:e.target.value}))} placeholder="Gemini API key"/></div></label><label className="field-label">Vercel access token<div className="token-input"><KeyRound size={15}/><input type="password" value={settings.vercelToken||''} onChange={e=>setSettings(s=>({...s,vercelToken:e.target.value}))} placeholder="Vercel token"/></div></label><button className="primary full" onClick={saveSettings} disabled={busy}>{busy?'Checking GitHub…':'Save & connect GitHub'}</button><button className="secondary full" onClick={async()=>{setSettings({});localStorage.removeItem(STORE);setOwner('');setRepos([]);setSelected('');toast('success','Saved settings cleared')} }>Clear settings</button><p className="security-warning">Never share tokens. Client-side token storage is not encrypted; revoke tokens if this device is shared. GitHub API limits individual file uploads to 100 MB, so a 500 MB ZIP may contain files that cannot be pushed through this method.</p></section></div>}
+ {showCreate&&<div className="modal-backdrop" onClick={()=>setShowCreate(false)}><section className="modal" onClick={e=>e.stopPropagation()}><div className="modal-head"><div><div className="kicker">GITHUB</div><h2>Create repository</h2></div><button className="mini-icon" onClick={()=>setShowCreate(false)}><X/></button></div><label className="field-label">Repository name<input value={newRepo} onChange={e=>setNewRepo(e.target.value)} placeholder="my-project"/></label><label className="check-option"><input type="checkbox" checked={privateRepo} onChange={e=>setPrivateRepo(e.target.checked)}/> Private repository</label><button className="primary full" onClick={createRepo} disabled={busy}>{busy?'Creating…':'Create repository'}</button></section></div>}
+ {notice&&<div className={`toast ${notice.type}`}><span>{notice.type==='error'?<CircleAlert size={17}/>:<CheckCircle2 size={17}/>}</span>{notice.message}<button onClick={()=>setNotice(null)}><X size={14}/></button></div>}
+ </div>
+}
 createRoot(document.getElementById('root')).render(<App/>);

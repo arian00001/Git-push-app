@@ -1,36 +1,36 @@
-# Dev Style Studio
+# Dev Style Studio — Sequential Project Automation
 
-Landscape-first React + Capacitor Android IDE starter for ZIP import, GitHub repository management and Actions build tracking.
+A compact React + Vite + Capacitor UI designed around one workflow rather than a dashboard full of unrelated modules.
 
-## Landscape Android UI
-The Android workflow patches `MainActivity` to `screenOrientation="landscape"`. The web UI has a dedicated short-height landscape layout: compact left icon rail, central workflow canvas, and right application-tools panel. The browser preview also switches to this layout when opened in landscape on a short screen.
+## Workflow
+1. Upload a ZIP (compressed archive limit: 500 MB).
+2. Extract and review its file list.
+3. Select or create a GitHub repository; open or delete the selected repository.
+4. Push extracted files with progress feedback.
+5. Android/Gradle projects receive a basic GitHub Actions APK workflow when one is not already included. Existing `workflow_dispatch` workflows are detected and triggered.
+6. Build status is polled from GitHub Actions; available artifacts can be downloaded.
+7. On failure, Gemini can inspect real GitHub Actions logs and relevant source files, generate bounded changes to existing files, push the changes, and trigger a retry. Automatic attempts are capped at three to avoid an uncontrolled API/cost loop.
+8. React/Vite projects can be connected to Vercel; static HTML projects can request GitHub Pages publishing.
 
-## Build APK
-1. Upload the contents of this folder to the root of a GitHub repository.
-2. Open Actions → **Build Android APK** → **Run workflow**.
-3. Download `dev-style-studio-apks` from the completed run's Artifacts section.
-4. Extract the artifact ZIP. It includes a debug APK; a signed release APK is included only if signing secrets are configured.
+## Setup
+- Open Settings and add a GitHub fine-grained token with access to the target repositories. Contents read/write is required for pushes; repository administration is needed for create/delete; Actions read/write is needed to inspect and dispatch workflows; Pages write may be needed to enable GitHub Pages.
+- Add a Gemini API key for AI-assisted build fixes.
+- Add a Vercel token and ensure the GitHub integration is connected for Vercel deployment.
 
-## Optional release signing
-Configure repository Actions secrets: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD`, `ANDROID_KEY_ALIAS`, and `ANDROID_KEY_PASSWORD`. Never commit the keystore or passwords.
+## Important limits
+- The 500 MB limit applies to the compressed ZIP. GitHub's Git Database API does not accept individual blobs above 100 MB; projects containing larger individual files will fail to push using this client-only method. Very large projects may also encounter browser memory/API rate limits.
+- Android projects need a working Gradle wrapper and compatible Android Gradle configuration. The generated workflow runs `assembleDebug`; it cannot guarantee every arbitrary project builds.
+- Artifact download is a GitHub Actions artifact ZIP; the APK is inside it unless the workflow uploads the APK directly as a separate downloadable artifact.
+- Vercel deployment requires a working GitHub integration. Static GitHub Pages publishing requires an `index.html` at the configured root and repository/account eligibility.
+- Gemini fixes are constrained to a small number of existing source/config files and at most three automated attempts. This is not a guarantee of fixing every build.
+- Tokens are stored in WebView localStorage in this version and are not encrypted. Use narrowly scoped tokens and revoke them when finished. A production release should move secrets to native encrypted storage/backend proxy.
 
-## Included
-- Compact stage-based UI for Workspace, Projects, GitHub and Build.
-- ZIP import and file tree.
-- GitHub token check, repo list/create/delete, binary-safe Git Trees API push.
-- GitHub Actions workflow discovery, dispatch, run polling and artifact download.
-- Gemini API build-error analysis for failed runs.
-- Vercel token verification only; automatic deployment is not implemented.
+## Build the app
+```bash
+npm install
+npm run build
+npx cap add android
+npx cap sync android
+```
 
-## Limitations
-- Gemini diagnoses errors and suggests fixes; it does not automatically modify code, push a fix, or rebuild.
-- Build tracking needs a compatible workflow with `workflow_dispatch` in the selected repository. The included YAML builds this Dev Style Studio project, not an arbitrary uploaded Android project.
-- Artifact download may be affected by browser/API permissions; use the run page as a fallback.
-- Tokens are stored in WebView localStorage, not encrypted Android Keystore storage. Use least-privilege tokens and revoke them after testing.
-
-
-## Focused automation flow
-The app opens to a single guided pipeline: Upload ZIP → inspect extracted files → select/create GitHub repository → push files → trigger an existing GitHub Actions workflow → monitor run time/status → download available artifacts. Settings contain GitHub, Gemini, and Vercel credentials. Gemini currently analyzes failed build logs and suggests fixes; generated fixes are not automatically edited, pushed, or retried in this starter. Review any AI-proposed code changes before applying them.
-
-## Verification status
-The ZIP archive can be integrity-checked locally. A full Vite/Android build was not completed in the current environment because package dependencies could not be installed (`vite: not found`). The GitHub Actions workflow should be run on GitHub to verify the Android build and signing setup.
+The included GitHub Actions workflow builds the Dev Style Studio wrapper APK. The workflow injected into an uploaded Gradle Android project builds that user's project separately.
