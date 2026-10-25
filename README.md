@@ -1,33 +1,36 @@
-# DEV STYLE Studio — Android source starter
+# Dev Style Studio
 
-- **Package:** `site.devstyle.studio`
-- **Language/UI:** Kotlin + Jetpack Compose
-- **Minimum Android:** API 26
-- **CI:** `.github/workflows/android.yml`
+A mobile-first React + Capacitor starter for importing a ZIP project and managing GitHub repositories from Android.
 
-## Source included
+## Included
+- Reference-inspired lime/glassmorphism interface, responsive for phone and desktop.
+- ZIP import and local file-tree preview (JSZip).
+- GitHub connection check, repository list, create/delete repo, and Git Trees API push.
+- Vercel token verification.
+- GitHub Actions workflow to build a debug APK artifact.
 
-- Compose-based white/lime-green Studio UI and bottom navigation.
-- Create HTML and React/Vite starter project files.
-- Import ZIP projects through Android's document picker, with archive path validation.
-- Local project metadata and source-file storage.
-- Basic text editor, save, and static HTML WebView preview.
-- GitHub token encrypted at rest using Android Keystore AES-GCM.
-- GitHub account test, repository listing/creation, project file push, and repository deletion with confirmation.
-- GitHub Actions workflow using JDK 17, Gradle 8.9, Android SDK 35, debug APK artifact upload, and test report upload.
+## Build APK with GitHub Actions
+1. Create a new GitHub repository and upload these project files to its root.
+2. Open **Actions** and enable workflows if prompted.
+3. Open **Build Android APK** → **Run workflow**. A push to `main`/`master` also triggers it.
+4. When the run completes, open its **Artifacts** section and download `dev-style-studio-debug-apk`.
+5. Extract the artifact ZIP; install `app-debug.apk` on your Android phone.
 
-## Build workflow notes
+The workflow creates the Capacitor Android project during CI. This repository intentionally does not include generated Gradle files.
 
-This project does not include `gradlew` or the Gradle wrapper JAR. The workflow explicitly installs Gradle 8.9 with `gradle/actions/setup-gradle@v4` and therefore runs `gradle` directly. Do not replace those commands with `./gradlew` unless a valid Gradle wrapper is added.
+## Run locally
+- Node.js 20+
+- `npm install`
+- `npm run dev` for browser preview.
+- To generate Android locally: `npm run build && npx cap add android && npx cap sync android`, then build `android/app` with Android Studio/Gradle.
 
-The workflow is configured for Android Gradle Plugin 8.7.3, which uses Gradle 8.9 and JDK 17. It installs Android SDK Platform 35 and Build Tools 35.0.0.
+## GitHub token permissions
+Use a fine-grained personal access token limited to the repositories you need. Grant **Contents: Read and write** for push. Repository creation/deletion requires **Administration: Read and write** and broader account access. If you only need push, do not grant administration.
 
-To build, push the extracted folder contents to a GitHub repository, then open **Actions → Android APK → Run workflow**. Download `dev-style-studio-debug-apk` if a build succeeds. This is a debug APK, not a signed production release.
-
-## Honest feature status
-
-This ZIP is a functional **starter**, not the complete universal IDE from the original PRD. Static HTML preview and basic source editing are implemented. The following remain unimplemented: actual Node.js runtime/React server execution, full Android project build/preview inside the app, AI patch engine, Vercel/Netlify deployment, Gmail inbox and auto-reply, six-hour preview process manager, and full APK release signing automation. These are not represented as working features in the UI.
-
-## Security notes
-
-Never commit API tokens, passwords, signing keys, `.env` files, or private keys. Review all files before pushing. GitHub permissions must be sufficient for the selected repository. GitHub API push currently targets text files and has file/size limits; it is not a full binary-capable Git client.
+## Important limitations / security
+- This is a working starter, not a certified production release. Review and test before relying on it.
+- GitHub file push uses the Git Trees API and is intended for normal text-based source projects. Binary assets (images, fonts, archives) are not safely supported by the current text conversion and may be corrupted. Do not use it to push binary files until binary-safe blob upload is added.
+- The Vercel integration currently verifies a token; automated project creation/deployment is not implemented yet.
+- AI scanner, email center, full code editing, SAF-native file picker and pull/merge UI are placeholders, not implemented backend features.
+- Credentials are stored in WebView `localStorage`, not Android Keystore encrypted storage. Use a dedicated least-privilege token, never upload the settings store, and revoke tokens after testing. For a production build, replace with native encrypted storage and add an explicit biometric/lock option.
+- Never paste access tokens into chat, screenshots, public repositories, or issue reports.

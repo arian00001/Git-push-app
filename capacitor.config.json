@@ -1,0 +1,6 @@
+{
+  "appId": "site.arian00001.devstylestudio",
+  "appName": "Dev Style Studio",
+  "webDir": "dist",
+  "bundledWebRuntime": false
+}
