@@ -43,24 +43,17 @@ jobs:
         run: |
           set -euo pipefail
 
-          : "${ANDROID_HOME:?ANDROID_HOME is not set by setup-android}"
-          SDKMANAGER="${ANDROID_HOME}/cmdline-tools/latest/bin/sdkmanager"
-
-          if [[ ! -x "$SDKMANAGER" ]]; then
-            echo "::error::sdkmanager not found at $SDKMANAGER"
-            echo "Installed command-line tools:"
-            find "${ANDROID_HOME}/cmdline-tools" -maxdepth 3 -type f -name sdkmanager -print || true
+          if ! command -v sdkmanager >/dev/null 2>&1; then
+            echo "::error::sdkmanager is not available on PATH. Check Android SDK setup."
+            if [ -n "${ANDROID_HOME:-}" ]; then
+              find "${ANDROID_HOME}" -path '*/bin/sdkmanager' -print 2>/dev/null || true
+            fi
             exit 1
           fi
 
-          yes | "$SDKMANAGER" --sdk_root="${ANDROID_HOME}" --licenses >/dev/null || true
-          "$SDKMANAGER" --sdk_root="${ANDROID_HOME}" \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
-
-          echo "ANDROID_HOME=${ANDROID_HOME}"
-          echo "ANDROID_SDK_ROOT=${ANDROID_SDK_ROOT:-${ANDROID_HOME}}"
+          echo "Using sdkmanager from: $(command -v sdkmanager)"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager --install "platform-tools" "platforms;android-35" "build-tools;35.0.0"
 
       - name: Build debug APK
         run: gradle --no-daemon --stacktrace assembleDebug
