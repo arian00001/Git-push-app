@@ -3,27 +3,30 @@ name: Android APK
 on:
   workflow_dispatch:
   push:
-    branches: ["main"]
+    branches:
+      - main
+      - master
     paths:
-      - "app/**"
-      - "*.gradle"
-      - "*.gradle.kts"
-      - "gradle/**"
-      - "gradle.properties"
-      - "settings.gradle"
-      - "settings.gradle.kts"
-      - ".github/workflows/android.yml"
+      - 'app/**'
+      - 'gradle/**'
+      - '*.gradle'
+      - '*.gradle.kts'
+      - 'gradle.properties'
+      - 'gradlew'
+      - '.github/workflows/android.yml'
 
 permissions:
   contents: read
 
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   build:
+    name: Build and test Android app
     runs-on: ubuntu-latest
-    env:
-      ANDROID_HOME: /usr/local/lib/android/sdk
-      ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-
+    timeout-minutes: 45
     steps:
       - name: Checkout source
         uses: actions/checkout@v4
@@ -32,58 +35,64 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
-      - name: Set up Gradle
+      - name: Set up Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "8.9"
+          gradle-version: '8.9'
 
-      - name: Install Android SDK command line tools
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0'
+
+      - name: Verify toolchain
         shell: bash
         run: |
           set -euo pipefail
-
-          mkdir -p "$ANDROID_SDK_ROOT"
-          chmod -R 777 "$ANDROID_SDK_ROOT"
-
-          if [ ! -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" ]; then
-            mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
-            cd "$ANDROID_SDK_ROOT/cmdline-tools"
-
-            curl -L \
-              "https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip" \
-              -o cmdline-tools.zip
-
-            unzip -q cmdline-tools.zip
-            rm -f cmdline-tools.zip
-
-            if [ -d "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" ]; then
-              rm -rf "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-              mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" "$ANDROID_SDK_ROOT/cmdline-tools/latest"
-            fi
-          fi
-
-          echo "SDK installed path:"
-          ls -R "$ANDROID_SDK_ROOT/cmdline-tools" || true
-
-          yes | "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_SDK_ROOT" --licenses >/dev/null || true
-
-          "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager" --sdk_root="$ANDROID_SDK_ROOT" --install \
-            "platform-tools" \
-            "platforms;android-35" \
-            "build-tools;35.0.0"
+          java -version
+          gradle --version
+          sdkmanager --list_installed
+          test -d "$ANDROID_HOME/platforms/android-35" || {
+            echo '::error::Android SDK Platform 35 was not installed.'
+            exit 1
+          }
 
       - name: Build debug APK
+        id: build
+        shell: bash
         run: gradle --no-daemon --stacktrace assembleDebug
 
       - name: Run unit tests
+        id: tests
+        if: steps.build.outcome == 'success'
+        shell: bash
         run: gradle --no-daemon --stacktrace testDebugUnitTest
 
-      - name: Upload APK
+      - name: List generated APKs
+        if: always()
+        shell: bash
+        run: |
+          echo 'APK files found:'
+          find . -type f -name '*.apk' -not -path '*/.gradle/*' -print || true
+
+      - name: Upload debug APK
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: dev-style-studio-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
+          path: '**/build/outputs/apk/**/*.apk'
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-style-studio-test-reports
+          path: |
+            **/build/test-results/**/*.xml
+            **/build/reports/tests/**/*.html
+          if-no-files-found: ignore
           retention-days: 14
