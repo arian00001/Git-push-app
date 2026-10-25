@@ -27,3 +27,10 @@ Configure repository Actions secrets: `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTO
 - Build tracking needs a compatible workflow with `workflow_dispatch` in the selected repository. The included YAML builds this Dev Style Studio project, not an arbitrary uploaded Android project.
 - Artifact download may be affected by browser/API permissions; use the run page as a fallback.
 - Tokens are stored in WebView localStorage, not encrypted Android Keystore storage. Use least-privilege tokens and revoke them after testing.
+
+
+## Focused automation flow
+The app opens to a single guided pipeline: Upload ZIP → inspect extracted files → select/create GitHub repository → push files → trigger an existing GitHub Actions workflow → monitor run time/status → download available artifacts. Settings contain GitHub, Gemini, and Vercel credentials. Gemini currently analyzes failed build logs and suggests fixes; generated fixes are not automatically edited, pushed, or retried in this starter. Review any AI-proposed code changes before applying them.
+
+## Verification status
+The ZIP archive can be integrity-checked locally. A full Vite/Android build was not completed in the current environment because package dependencies could not be installed (`vite: not found`). The GitHub Actions workflow should be run on GitHub to verify the Android build and signing setup.
