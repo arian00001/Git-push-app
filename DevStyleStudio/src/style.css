@@ -167,3 +167,46 @@
 
 /* Neutral light IDE rail; avoid the dark sidebar shown in the earlier draft */
 @media (orientation:landscape) and (max-height:700px){.sidebar{background:rgba(255,255,255,.88)!important;color:#4d5744!important;border:1px solid #e4e9db;box-shadow:0 8px 25px #26301a0b}.nav-btn{color:#68715f!important}.nav-btn:hover,.nav-btn.active{background:#d5f66c!important;color:#29321f!important}.avatar{background:#e6f5c3!important;color:#3c4b29!important;border-color:#f7faef!important}.brand-mark{color:#799b2d!important}}
+
+/* Definitive sequential automation UI: light, focused, animated */
+:root{--lime:#d1f451;--glass:rgba(255,255,255,.88);--ink:#252c20}
+body{background:radial-gradient(ellipse at 12% 0%,#f1ffd2 0,transparent 38%),radial-gradient(ellipse at 100% 100%,#e9efff 0,transparent 36%),#f7f8f0;color:#252c20}
+.app-shell{padding:clamp(12px,3vw,30px);gap:0;min-height:100dvh}
+.main-area{width:100%;max-width:1060px;margin:0 auto}
+.sidebar{display:none!important}
+.topbar{padding:8px 4px 22px;max-width:1180px;margin:0 auto}
+.topbar h1{font-size:clamp(27px,4vw,42px);letter-spacing:-1.7px}
+.topbar p{font-size:12px;color:#78806d}
+.settings-top{background:#fff;border:1px solid #e0e7d3;border-radius:15px;width:46px;height:46px;transition:transform .2s,box-shadow .2s}
+.settings-top:hover{transform:rotate(18deg);box-shadow:0 8px 22px #26301a12}
+.automation-shell{border:1px solid #fff;box-shadow:0 24px 70px #27351a12,inset 0 1px 0 #fff;border-radius:28px;background:rgba(255,255,255,.78);backdrop-filter:blur(24px);padding:clamp(16px,3vw,30px);animation:workspaceIn .55s cubic-bezier(.2,.8,.2,1) both}
+@keyframes workspaceIn{from{opacity:0;transform:translateY(12px) scale(.99)}to{opacity:1;transform:translateY(0) scale(1)}}
+.automation-head{margin-bottom:24px}
+.automation-head h2{font-size:clamp(23px,3.4vw,34px);margin:8px 0}
+.automation-head p{font-size:13px;max-width:620px}
+.pipeline-steps{padding:12px 14px;background:#f8faF2;border:1px solid #e8eddd;border-radius:18px;gap:6px}
+.pipeline-step{position:relative;transition:color .25s,transform .25s}
+.pipeline-step.current{transform:translateY(-2px);color:#343d27}
+.pipeline-step.current span{box-shadow:0 0 0 5px #d1f45135;animation:stepPulse 1.8s ease-in-out infinite}
+@keyframes stepPulse{0%,100%{box-shadow:0 0 0 3px #d1f45120}50%{box-shadow:0 0 0 7px #d1f4514d}}
+.zip-drop{min-height:clamp(250px,42vh,390px);border:1.5px dashed #bfd779;border-radius:24px;background:radial-gradient(#dce7c9 1px,transparent 1px),linear-gradient(145deg,#fffefa,#f7fbe9);background-size:17px 17px,auto;animation:stageIn .45s cubic-bezier(.2,.8,.2,1) both}
+.zip-drop>svg{width:46px;height:46px;stroke-width:1.4;animation:floatIcon 3s ease-in-out infinite}
+@keyframes floatIcon{0%,100%{transform:translateY(0)}50%{transform:translateY(-6px)}}
+.big-action{min-height:56px;min-width:min(330px,100%);border-radius:16px;background:linear-gradient(120deg,#d9fb69,#c4ef3d);box-shadow:0 9px 24px #a8d93a35;transition:transform .22s,box-shadow .22s,filter .22s}
+.big-action:hover{transform:translateY(-3px) scale(1.01);box-shadow:0 15px 30px #a8d93a4d;filter:saturate(1.08)}
+.stage-card{border-radius:22px;border-color:#e4ead8;box-shadow:0 12px 35px #26301a08;animation:stageIn .4s cubic-bezier(.2,.8,.2,1) both}
+.primary-action{background:linear-gradient(120deg,#d7f765,#c5ee42)!important;border:1px solid #c6e95e!important;border-radius:13px!important;color:#26311c!important;transition:transform .2s,box-shadow .2s!important}
+.primary-action:hover:not(:disabled){transform:translateY(-2px);box-shadow:0 8px 18px #a9d43b32}
+.secondary-btn{border-radius:13px!important;min-height:42px}
+.stage-label select{border-radius:14px;padding:14px}
+.push-live{padding:14px;margin-bottom:17px;border:1px solid #e2edc8;background:#f7fbe9;border-radius:15px;animation:stageIn .25s ease both}
+.push-live-head{display:flex;align-items:center;justify-content:space-between;font-size:12px;margin-bottom:9px}.push-live-head span{font-weight:700;color:#688b25;font-variant-numeric:tabular-nums}
+.push-track{height:7px;background:#e5ebd7;border-radius:99px;overflow:hidden}.push-track i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,#b8e63b,#e1fa79);transition:width .2s ease}
+.push-live>small{display:block;margin-top:8px;color:#7b846d;font-size:10px;line-height:1.4}
+.build-progress{border:1px solid #e1ebcc;border-radius:15px;background:#f7fbe9;padding:15px}
+.progress-spinner{border-color:#dce9c5;border-top-color:#8eb92c;animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.result-card{background:linear-gradient(145deg,#fff,#f8fceF)}
+.modal-backdrop{background:#65705450;backdrop-filter:blur(12px)}.modal{border-radius:25px;box-shadow:0 28px 100px #2b341d25}
+@media(max-width:680px){.app-shell{padding:10px}.topbar{padding:8px 3px 16px}.topbar h1{font-size:clamp(25px,7vw,34px)}.topbar p{font-size:10px}.automation-shell{padding:13px;border-radius:22px}.automation-head{margin-bottom:16px}.automation-head h2{font-size:22px}.automation-head p{font-size:11px}.pipeline-steps{padding:10px 6px;gap:3px}.pipeline-step{flex-direction:column;align-items:center;gap:5px;text-align:center}.pipeline-step span{width:27px;height:27px}.pipeline-step small{font-size:8px;white-space:normal;line-height:1.2}.zip-drop{min-height:260px;padding:15px}.stage-actions{display:grid;grid-template-columns:1fr}.stage-actions button{width:100%;min-height:46px}.stage-card{padding:14px}.result-card>b{font-size:18px}}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;animation-iteration-count:1!important;scroll-behavior:auto!important;transition-duration:.01ms!important}}

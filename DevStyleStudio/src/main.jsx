@@ -132,11 +132,13 @@ const App = () => {
       try { const ref=await api(`/repos/${selectedRepo.full_name}/git/ref/heads/${encodeURIComponent(defaultBranch)}`,settings.githubToken); sha=ref.object.sha; } catch {}
       const baseTree = sha ? (await api(`/repos/${selectedRepo.full_name}/git/commits/${sha}`,settings.githubToken)).tree.sha : null;
       const tree = [];
+      setPushProgress(0);
       for(let i=0;i<files.length;i++){
         const f=files[i];
+        setPushProgress(Math.round((i / Math.max(files.length,1)) * 85));
         const blob=await api(`/repos/${selectedRepo.full_name}/git/blobs`,settings.githubToken,{method:'POST',body:JSON.stringify({content:bytesToBase64(f.bytes),encoding:'base64'})});
         tree.push({path:f.path,mode:'100644',type:'blob',sha:blob.sha});
-        if(i%10===0) log(`Preparing file ${i+1}/${files.length}`);
+        if(i%5===0) log(`Uploading file ${i+1}/${files.length}`);
       }
       const treeObj=await api(`/repos/${selectedRepo.full_name}/git/trees`,settings.githubToken,{method:'POST',body:JSON.stringify({base_tree:baseTree,tree})});
       const commit=await api(`/repos/${selectedRepo.full_name}/git/commits`,settings.githubToken,{method:'POST',body:JSON.stringify({message:`Upload project via Dev Style Studio (${new Date().toISOString().slice(0,10)})`,tree:treeObj.sha,...(sha?{parents:[sha]}:{})})});
@@ -145,6 +147,26 @@ const App = () => {
       setPushProgress(100); setPipelineStage('build');
       log(`Pushed ${files.length} files to ${selectedRepo.full_name}`);
       toast('success',`Push complete: ${files.length} files`);
+      // Continue the automation: find a workflow that supports manual dispatch and start it.
+      try {
+        const wfData = await api(`/repos/${selectedRepo.full_name}/actions/workflows?per_page=100`, settings.githubToken);
+        const available = wfData.workflows || [];
+        setWorkflows(available);
+        const target = available.find(w => w.state === 'active' && Array.isArray(w.events) && w.events.includes('workflow_dispatch') && (w.name || '').toLowerCase().match(/apk|android|build|release/)) || available.find(w => w.state === 'active' && Array.isArray(w.events) && w.events.includes('workflow_dispatch'));
+        if (target) {
+          setWorkflowId(String(target.id));
+          const ref = selectedRepo.default_branch || 'main';
+          await api(`/repos/${selectedRepo.full_name}/actions/workflows/${target.id}/dispatches`, settings.githubToken, {method:'POST', body:JSON.stringify({ref})});
+          setBuildStartedAt(Date.now()); setElapsed(0); setBuildBusy(true); setPipelineStage('build');
+          log(`Automatically triggered workflow: ${target.name}`);
+          toast('success', `Build started: ${target.name}`);
+        } else {
+          toast('error','Files pushed, but no active workflow was found. Add a GitHub Actions build YAML to the repository.');
+        }
+      } catch (wfError) {
+        log(`Build trigger needs attention: ${wfError.message}`);
+        toast('error',`Files pushed; build trigger failed: ${wfError.message}`);
+      }
     } catch(e){toast('error',`Push failed: ${e.message}`);log(`ERROR: ${e.message}`)}
     finally{setBusy(false)}
   };
@@ -247,26 +269,15 @@ const App = () => {
       setVercelStatus('Connected'); setSettings(s=>({...s,vercelToken:s.vercelToken.trim()})); toast('success','Vercel token verified.');
     }catch(e){setVercelStatus('Not connected');toast('error',e.message)}finally{setBusy(false)}
   };
-  const nav = [
-    {name:'Workspace',icon:Home},{name:'Projects',icon:Folder},{name:'GitHub',icon:Github},
-    {name:'Deploy',icon:Rocket}
-  ];
   return <div className="app-shell">
-    <aside className={`sidebar ${mobileNav?'nav-open':''}`}>
-      <div className="brand-mark"><span>///</span></div>
-      <div className="nav-list">{nav.map(n=><button key={n.name} className={`nav-btn ${tab===n.name?'active':''}`} onClick={()=>{setTab(n.name);setMobileNav(false)}} title={n.name}><n.icon size={20}/><span>{n.name}</span></button>)}</div>
-      <div className="sidebar-bottom"><button className="nav-btn" onClick={()=>setShowSettings(true)}><Settings size={20}/><span>Settings</span></button><div className="avatar">DS</div></div>
-    </aside>
-    {mobileNav&&<div className="nav-scrim" onClick={()=>setMobileNav(false)}/>}
     <main className="main-area">
-      <header className="topbar"><button className="mobile-menu icon-btn" onClick={()=>setMobileNav(!mobileNav)}><Menu/></button><div><div className="eyebrow">MOBILE DEVELOPMENT WORKSPACE</div><h1><span>DEV</span> STYLE Studio</h1><p>Build, organize and publish your code — right from your phone.</p></div><button className="settings-top icon-btn" onClick={()=>setShowSettings(true)}><Settings size={19}/></button></header>
-      <div className="stage-tabs">{[{name:'Workspace',icon:Home},{name:'Projects',icon:Folder},{name:'GitHub',icon:Github},{name:'Deploy',icon:Rocket}].map(n=><button key={n.name} className={tab===n.name?'active':''} onClick={()=>{setTab(n.name);if(n.name==='Deploy'&&selected)loadBuildData(selected)}}><n.icon size={15}/>{n.name}</button>)}</div>
+      <header className="topbar"><button className="mobile-menu icon-btn" onClick={()=>setMobileNav(!mobileNav)}><Menu/></button><div><div className="eyebrow">MOBILE DEVELOPMENT WORKSPACE</div><h1><span>DEV</span> STYLE Studio</h1><p>One step at a time · ZIP → GitHub → Build → APK</p></div><button className="settings-top icon-btn" onClick={()=>setShowSettings(true)}><Settings size={19}/></button></header>
       <section className="automation-shell panel">
         <div className="automation-head"><div><span className="step-tag">AUTOMATED PROJECT PIPELINE</span><h2>{pipelineStage==='zip'?'Start with your ZIP':pipelineStage==='repo'?'Project extracted':pipelineStage==='push'?'Choose your destination':pipelineStage==='build'?'Build in progress':pipelineStage==='result'?'Build successful':'Build needs attention'}</h2><p>{pipelineStage==='zip'?'Upload once. The workspace will guide you through each next step.':pipelineStage==='repo'?'Your archive is unpacked and the file tree is ready.':pipelineStage==='push'?'Select a GitHub repository, then push the extracted files.':pipelineStage==='build'?'GitHub Actions is processing your project. Watch the live status below.':pipelineStage==='result'?'Your latest build completed. Download the artifact or open the release workflow.':'Gemini can inspect the latest GitHub Actions logs and suggest a fix.'}</p></div><button className="icon-btn" onClick={()=>setShowSettings(true)} title="Settings"><Settings size={18}/></button></div>
         <div className="pipeline-steps">{[{id:'zip',label:'Upload ZIP'},{id:'repo',label:'Organize files'},{id:'push',label:'Git push'},{id:'build',label:'Build APK'},{id:'result',label:'Artifact'}].map((st,i)=><div key={st.id} className={`pipeline-step ${pipelineStage===st.id?'current':(['repo','push','build','result'].indexOf(pipelineStage)>=['repo','push','build','result'].indexOf(st.id)&&pipelineStage!=='ai'?'done':'')}`}><span>{['repo','push','build','result'].indexOf(pipelineStage)>=i && pipelineStage!=='ai'?'✓':i+1}</span><small>{st.label}</small></div>)}</div>
         {pipelineStage==='zip'&&<div className="zip-drop"><FileArchive size={35}/><b>Upload project ZIP</b><small>React, Kotlin, Java or Android project archives</small><button className="primary-action big-action" onClick={()=>document.getElementById('zip-input').click()} disabled={busy}><Upload size={18}/>{busy?'Importing ZIP…':'Choose ZIP file'}</button><small>Files are extracted locally; the ZIP itself is not pushed as an archive.</small></div>}
         {pipelineStage==='repo'&&<div className="stage-card"><div className="stage-card-title"><FolderOpen/><div><b>{zipName||'Imported project'}</b><small>{files.length} extracted files · sorted by path</small></div><button className="text-btn" onClick={()=>setPipelineStage('zip')}>Replace ZIP</button></div><div className="compact-file-tree">{visibleFiles.slice(0,6).map(f=><div className="file-row" key={f.path}><File size={14}/><span>{f.path}</span><small>{f.size<1024?f.size+' B':(f.size/1024).toFixed(1)+' KB'}</small></div>)}{files.length>6&&<small className="muted">+ {files.length-6} more files</small>}</div><div className="stage-actions"><button className="secondary-btn" onClick={()=>setShowSettings(true)}>Connect GitHub</button><button className="primary-action" onClick={()=>{setPipelineStage('push');if(settings.githubToken)loadRepos()}}><Github size={16}/> Continue to repository</button></div></div>}
-        {pipelineStage==='push'&&<div className="stage-card"><label className="stage-label">GitHub repository<select value={selected} onChange={e=>{setSelected(e.target.value);if(e.target.value){setPipelineStage('push');loadBuildData(e.target.value)}}}><option value="">Select a repository…</option>{repos.map(r=><option key={r.id} value={r.full_name}>{r.full_name}</option>)}</select></label><div className="stage-actions"><button className="secondary-btn" onClick={()=>loadRepos()} disabled={busy}><RefreshCw size={15}/> Refresh repos</button><button className="secondary-btn" onClick={()=>setShowCreate(true)}><Plus size={15}/> Create repo</button><button className="primary-action" onClick={pushProject} disabled={busy||!selected||!files.length}><CloudUpload size={16}/>{busy?'Pushing files…':'Push project files'}</button></div><small className="muted">Push sends extracted project files to the selected branch, not the ZIP file.</small></div>}
+        {pipelineStage==='push'&&<div className="stage-card">{busy&&<div className="push-live"><div className="push-live-head"><b>Git push in progress</b><span>{pushProgress}%</span></div><div className="push-track"><i style={{width:`${pushProgress}%`}}/></div><small>Uploading extracted files to the selected repository. Keep this screen open.</small></div>}<label className="stage-label">GitHub repository<select value={selected} onChange={e=>{setSelected(e.target.value);if(e.target.value){setPipelineStage('push');loadBuildData(e.target.value)}}}><option value="">Select a repository…</option>{repos.map(r=><option key={r.id} value={r.full_name}>{r.full_name}</option>)}</select></label><div className="stage-actions"><button className="secondary-btn" onClick={()=>loadRepos()} disabled={busy}><RefreshCw size={15}/> Refresh repos</button><button className="secondary-btn" onClick={()=>setShowCreate(true)}><Plus size={15}/> Create repo</button><button className="primary-action" onClick={pushProject} disabled={busy||!selected||!files.length}><CloudUpload size={16}/>{busy?'Pushing files…':'Push project files'}</button></div><small className="muted">Push sends extracted project files to the selected branch, not the ZIP file.</small></div>}
         {pipelineStage==='build'&&<div className="stage-card"><div className="build-progress"><div className="progress-spinner"/><div><b>{buildBusy?'GitHub Actions is building':'Ready to trigger GitHub Actions'}</b><small>{buildBusy?`Elapsed time: ${Math.floor(elapsed/60)}m ${elapsed%60}s · auto-checking run status`:'Select a workflow and start the build.'}</small></div></div><label className="stage-label">Workflow<select value={workflowId} onChange={e=>setWorkflowId(e.target.value)}><option value="">Select workflow…</option>{workflows.map(w=><option key={w.id} value={String(w.id)}>{w.name}</option>)}</select></label><div className="stage-actions"><button className="secondary-btn" onClick={()=>loadBuildData()} disabled={busy}><RefreshCw size={15}/> Refresh status</button><button className="primary-action" onClick={startBuild} disabled={busy||buildBusy||!workflowId}><Rocket size={16}/>{buildBusy?'Build running…':'Build APK'}</button></div><small className="muted">The selected repository must contain a GitHub Actions workflow supporting workflow_dispatch.</small></div>}
         {pipelineStage==='result'&&<div className="stage-card result-card"><CheckCircle2 size={32}/><b>Build completed successfully</b><small>{artifacts.length} available artifact(s). Download the APK package below.</small>{artifacts.map(a=><div className="artifact-row" key={a.id}><PackageCheck/><div className="run-info"><b>{a.name}</b><small>{(a.size_in_bytes/1024/1024).toFixed(1)} MB</small></div><button className="primary-action" onClick={()=>downloadArtifact(a)}><Download size={15}/> Download</button></div>)}<div className="stage-actions"><button className="secondary-btn" onClick={()=>setPipelineStage('build')}>Build again</button><button className="primary-action" onClick={()=>setTab('Deploy')}>Open release & deploy</button></div></div>}
         {pipelineStage==='ai'&&<div className="stage-card"><div className="ai-heading"><Sparkles/><div><b>Gemini build assistant</b><small>Analyze GitHub Actions logs to identify likely build errors.</small></div></div><button className="primary-action" onClick={analyzeBuildError} disabled={busy}><Sparkles size={16}/>{busy?'Analyzing logs…':'Analyze build error'}</button>{geminiReport&&<pre className="ai-report">{geminiReport}</pre>}<div className="stage-actions"><button className="secondary-btn" onClick={()=>setPipelineStage('build')}>Review build settings</button><button className="primary-action" onClick={()=>setTab('GitHub')}>Open repository</button></div><small className="muted">AI suggestions are not applied or pushed automatically in this version; review generated changes before rebuilding.</small></div>}
